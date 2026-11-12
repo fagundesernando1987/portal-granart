@@ -19,6 +19,60 @@ st.markdown('''<style>
 .period{background:white;border-left:4px solid #aa987a;padding:12px 16px;border-radius:8px;margin:8px 0 16px}
 .stButton button{border-radius:9px!important}
 </style>''',unsafe_allow_html=True)
+
+import hashlib as _hashlib
+import hmac as _hmac
+import time as _time
+
+def _autenticar_granart():
+    try:
+        usuarios = dict(st.secrets["usuarios"])
+    except Exception:
+        usuarios = {}
+    if not usuarios:
+        st.error("Portal bloqueado: configure [usuarios] nos Secrets do Streamlit.")
+        st.stop()
+    atual = st.session_state.get("_granart_usuario")
+    if atual in usuarios:
+        with st.sidebar:
+            st.caption("Usuário: " + atual)
+            if st.button("Sair da conta", key="granart_sair"):
+                del st.session_state["_granart_usuario"]
+                st.rerun()
+        return
+    st.title("Portal Executivo Gran’Art")
+    st.subheader("Acesso restrito aos sócios")
+    with st.form("granart_login", clear_on_submit=True):
+        usuario = st.text_input("Usuário").strip().lower()
+        senha = st.text_input("Senha", type="password")
+        entrar = st.form_submit_button("Entrar")
+    if entrar:
+        agora = _time.monotonic()
+        n = st.session_state.get("_granart_erros", 0)
+        t = st.session_state.get("_granart_erro_tempo", 0)
+        if n >= 5 and agora - t < 120:
+            st.error("Muitas tentativas. Aguarde 2 minutos.")
+        else:
+            ok = False
+            try:
+                tipo, sal, hash_hex = str(usuarios.get(usuario, "")).split("$")
+                if tipo == "pbkdf2_sha256":
+                    calculado = _hashlib.pbkdf2_hmac("sha256", senha.encode(), bytes.fromhex(sal), 600000)
+                    ok = _hmac.compare_digest(calculado, bytes.fromhex(hash_hex))
+            except (ValueError, TypeError):
+                pass
+            if ok:
+                st.session_state["_granart_usuario"] = usuario
+                st.session_state["_granart_erros"] = 0
+                st.rerun()
+            else:
+                st.session_state["_granart_erros"] = n + 1
+                st.session_state["_granart_erro_tempo"] = agora
+                st.error("Usuário ou senha incorretos.")
+    st.stop()
+
+_autenticar_granart()
+
 MONTHS=['Jan','Fev','Mar','Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez']
 FULL=['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro']
 FIELDS=[('Receita Bruta','receita_bruta'),('(-) Reserva Técnica dos Arquitetos','reserva_tecnica'),('(-) Simples Nacional','simples'),('(=) RECEITA LÍQUIDA','receita_liquida'),('(-) CPV','cpv'),('(=) LUCRO BRUTO','lucro_bruto'),('(-) Despesas Operacionais','despesas'),('(-) Salários e Encargos','salarios_encargos'),('(-) Pró-labore','pro_labore'),('(-) Depreciação','depreciacao'),('(+/-) Resultado Financeiro','resultado_financeiro'),('(+/-) Baixa de Clientes','baixa_clientes'),('(=) LUCRO LÍQUIDO','lucro_liquido')]
