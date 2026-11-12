@@ -576,3 +576,4 @@ elif nav=='Materiais e Estoque':
     if f.empty:st.info('Não há demanda pendente de materiais para os filtros selecionados.')
     for k in ['demanda_pendente_m2','estoque_material_m2','necessidade_teorica_m2','saldo_material_m2']:f[k]=val(f,k).map(lambda z:num(z,1))
     show(f,['material','demanda_pendente_m2','estoque_material_m2','necessidade_teorica_m2','saldo_material_m2'],{'material':'Material','demanda_pendente_m2':'Demanda pendente (m²)','estoque_material_m2':'Estoque de material (m²)','necessidade_teorica_m2':'Necessidade de compra (m²)','saldo_material_m2':'Saldo de material (m²)'},height=470)
+
