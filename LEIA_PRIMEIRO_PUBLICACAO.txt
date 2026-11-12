@@ -1,0 +1,30 @@
+GRAN'ART - PACOTE PARA GITHUB PRIVADO / STREAMLIT COMMUNITY CLOUD
+
+ATENCAO: Este pacote NAO contem planilhas, dados financeiros, backups ou segredos.
+O app depende de configurar a conexao Google Sheets ANTES de permitir acesso.
+
+1) No repositorio PRIVADO portal-granart, envie somente os arquivos deste ZIP.
+2) Em Streamlit Community Cloud, conecte esse repositorio, app.py na raiz.
+3) Configure Secrets NO PAINEL DO STREAMLIT, nunca no GitHub:
+   google_sheets_id = "ID_DA_PLANILHA"
+   [gcp_service_account]
+   type = "service_account"
+   project_id = "..."
+   private_key_id = "..."
+   private_key = "..."
+   client_email = "..."
+   client_id = "..."
+   token_uri = "https://oauth2.googleapis.com/token"
+   ... (demais campos da chave JSON fornecida pelo Google)
+4) Compartilhe a planilha Google com o email da conta de servico, como Leitor.
+5) Restrinja o acesso ao aplicativo aos tres socios; verifique as permissoes
+   atuais da plataforma antes de expor informacoes confidenciais.
+6) Confira todas as telas e PDFs. Os CSVs locais e o snapshot foram
+   intencionalmente excluidos: a nuvem deve consultar a planilha ao vivo.
+
+IMPORTANTE: A autenticacao OAuth por token_google.json local NAO funciona
+na nuvem. E necessario configurar uma conta de servico ou adaptar o
+metodo de autenticacao. Nao envie chaves por chat nem por GitHub.
+
+O app original nao foi reescrito: este pacote apenas adiciona dependencias
+e remove dados/segredos locais.
