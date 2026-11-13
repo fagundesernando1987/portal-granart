@@ -124,11 +124,11 @@ def load_sheet(name,live):
             if not creds.valid and creds.expired and creds.refresh_token:creds.refresh(Request())
             if not creds.valid:raise RuntimeError('Autenticação Google expirada; execute a publicação normal para renovar o acesso.')
         ws=gspread.authorize(creds).open_by_key(str(CFG['google_sheets_id'])).worksheet(name)
-        records=ws.get_all_records(default_blank='',numericise_ignore=['all'])
+        records=ws.get_all_records(default_blank='',numericise_ignore=['all'],value_render_option='UNFORMATTED_VALUE' if name in {'BI_Planejamento','BI_Parametros_Planejamento','BI_Tickets_Anuais'} else 'FORMATTED_VALUE')
         frame=pd.DataFrame(records)
         # Planilhas: conversão de números em formatos pt-BR e internacionais
         for col in frame.columns:
-            if col in {'orcamento','venda','codigo_venda','linha_excel','ordem','pedidos','dias_prazo','qtd_itens','qtd_selecionados','qtd_alternativas','m2_previsto','m2_realizado','m2_pendente','estoque_material_m2','demanda_pendente_m2','necessidade_teorica_m2','saldo_material_m2','valor','valor_venda','valor_orcado_oficial','valor_final_controle','valor_vendido','valor_recebido','saldo_receber','m2_sem_quebra','m2_com_quebra','valor_item'} or col in [k for _,k in FIELDS]:
+            if col in {'orcamento','venda','codigo_venda','linha_excel','ordem','pedidos','dias_prazo','qtd_itens','qtd_selecionados','qtd_alternativas','m2_previsto','m2_realizado','m2_pendente','estoque_material_m2','demanda_pendente_m2','necessidade_teorica_m2','saldo_material_m2','valor_venda','valor_orcado_oficial','valor_final_controle','valor_vendido','valor_recebido','saldo_receber','m2_sem_quebra','m2_com_quebra','valor_item'} or (col in [k for _,k in FIELDS]):
                 def parse(v):
                     s=str(v).strip().replace('R$','').replace(' ','')
                     if not s:return None
@@ -390,6 +390,7 @@ elif nav=='Margem e Planejamento':
     base_month_net=float(val(historical.tail(1),'receita_liquida').iloc[0])
     if base_net<=0:st.error('Receita líquida histórica inválida.');st.stop()
     st.subheader('Simulador mensal de margem e lucro')
+    st.caption('Os campos de entrada utilizam números sem separador de milhar para evitar erros de interpretação; os resultados abaixo aparecem formatados em reais.')
     c1,c2,c3,c4=st.columns(4)
     with c1: gross=st.number_input('Receita bruta simulada (R$)',min_value=0.,value=float(max(0,round(base_month_net*(1+prm('simples_sobre_liquida')+prm('reserva_tecnica_sobre_liquida')),2))),step=10000.,format='%.2f')
     with c2:tax=st.number_input('Simples (% da líquida)',min_value=0.,max_value=100.,value=round(prm('simples_sobre_liquida')*100,3),step=.1,format='%.3f')/100
@@ -413,19 +414,37 @@ elif nav=='Margem e Planejamento':
     breakeven_oper=(fixed_oper/margin_contrib)*(1+tax+rt) if margin_contrib>0 else None
     breakeven_full=((fixed_oper-fin-bad)/margin_contrib)*(1+tax+rt) if margin_contrib>0 else None
     required=((desired+fixed_oper-fin-bad)/margin_contrib)*(1+tax+rt) if margin_contrib>0 else None
-    cards([('Receita líquida',money(net)),('Margem de contribuição',money(contrib)),('Lucro operacional',money(operating)),('Lucro líquido simulado',money(profit))])
+    cards([('Receita líquida',money(net)),('Lucro bruto',money(contrib)),('Margem de contribuição',money(contrib)),('Lucro operacional',money(operating)),('Lucro líquido simulado',money(profit))])
     cards([('Equilíbrio operacional (bruto)',money(max(0,breakeven_oper)) if breakeven_oper is not None else 'Inviável'),('Equilíbrio com financeiro (bruto)',money(max(0,breakeven_full)) if breakeven_full is not None else 'Inviável'),('Bruto para lucro desejado',money(max(0,required)) if required is not None else 'Inviável')])
     with st.expander('DRE completa da simulação',expanded=False):
         details=[('Receita bruta',gross),('(-) Simples Nacional',-simples),('(-) Reserva técnica',-reserve),('Receita líquida',net),('(-) CPV / materiais',-material),('Margem de contribuição',contrib),('(-) Salários e encargos',-salary),('(-) Pró-labore',-pro),('(-) Despesas operacionais',-opex),('(-) Depreciação',-dep),('Resultado financeiro',fin),('Baixa de clientes',bad),('Lucro líquido',profit)]
         show(pd.DataFrame([{'Conta':name,'Valor':money(v),'% da receita líquida':pct(v/net*100) if net else '—'} for name,v in details]),['Conta','Valor','% da receita líquida'],height=490)
     st.divider()
     st.subheader('Planejamento anual e próximos 12 meses')
-    plan['mes']=pd.to_datetime(plan['mes'],errors='coerce');plan['ano']=pd.to_numeric(plan['ano'],errors='coerce').astype('Int64')
+    def parse_plan_month(v):
+        t=str(v).strip()
+        if not t or t.lower() in ('nan','none'):return pd.NaT
+        if re.fullmatch(r'\d{4}-\d{2}(?:-\d{2})?',t):return pd.to_datetime(t[:7],format='%Y-%m',errors='coerce')
+        # Google Sheets pode converter '2026-01' para uma data serial.
+        try:
+            n=float(t)
+            if 30000<n<80000:return pd.Timestamp('1899-12-30')+pd.to_timedelta(n,unit='D')
+        except (ValueError,TypeError):pass
+        return pd.to_datetime(t,dayfirst=True,errors='coerce')
+    plan['mes']=plan['mes'].map(parse_plan_month).dt.to_period('M').dt.to_timestamp()
+    # Ano obtido do mês, evitando valores de ano formatados incorretamente pelo Sheets.
+    plan['ano']=plan['mes'].dt.year.astype('Int64')
     for col in ('meta_lucro_anual','meta_receita_bruta_anual','peso_sazonal','receita_bruta_planejada'):
         plan[col]=pd.to_numeric(plan[col],errors='coerce')
     years_plan=sorted(plan.ano.dropna().astype(int).unique().tolist())
+    if not years_plan:
+        st.error('Os meses do planejamento chegaram em formato inválido do Google Sheets. Verifique a guia BI_Planejamento (coluna mes).')
+        st.stop()
     year=st.selectbox('Exercício do planejamento',years_plan,index=0)
     annual=plan[plan.ano.eq(year)].sort_values('mes').copy()
+    if annual.empty:
+        st.error('Nenhum mês encontrado para o exercício selecionado.')
+        st.stop()
     goal=float(annual.meta_lucro_anual.iloc[0]);gross_target=float(annual.meta_receita_bruta_anual.iloc[0])
     cards([('Meta de lucro aprovada',money(goal)),('Faturamento bruto aprovado',money(gross_target)),('Sazonalidade do plano',str(int(annual.sazonalidade_ano.iloc[0])))])
     st.caption('O plano aprovado é fixo e não muda com os ajustes do simulador. Para revisar o orçamento, edite e aprove a configuração de planejamento na automação.')
