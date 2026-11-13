@@ -76,7 +76,7 @@ _autenticar_granart()
 MONTHS=['Jan','Fev','Mar','Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez']
 FULL=['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro']
 FIELDS=[('Receita Bruta','receita_bruta'),('(-) Reserva Técnica dos Arquitetos','reserva_tecnica'),('(-) Simples Nacional','simples'),('(=) RECEITA LÍQUIDA','receita_liquida'),('(-) CPV','cpv'),('(=) LUCRO BRUTO','lucro_bruto'),('(-) Despesas Operacionais','despesas'),('(-) Salários e Encargos','salarios_encargos'),('(-) Pró-labore','pro_labore'),('(-) Depreciação','depreciacao'),('(+/-) Resultado Financeiro','resultado_financeiro'),('(+/-) Baixa de Clientes','baixa_clientes'),('(=) LUCRO LÍQUIDO','lucro_liquido')]
-TABS=['Indicadores','DRE_Mensal','DRE_Gerencial','Metas_Comparativas','Metas_2026','BI_Caixa','BI_Comparativos','BI_Resumo_Producao','BI_Carteira_Producao','BI_Detalhe_Materiais','BI_Estoque_Materiais','BI_Orcamentos_Comercial','BI_Orcamentos_Itens']
+TABS=['Indicadores','DRE_Mensal','DRE_Gerencial','BI_Caixa','BI_Resumo_Producao','BI_Carteira_Producao','BI_Detalhe_Materiais','BI_Estoque_Materiais','BI_Orcamentos_Comercial','BI_Orcamentos_Itens']
 
 def num(x,dec=1):
     try:return f'{float(x):,.{dec}f}'.replace(',','@').replace('.',',').replace('@','.')
@@ -181,14 +181,14 @@ def chart(fig):
 
 with st.sidebar:
     st.image(str(ROOT/'logo_granart.png'),width='stretch')
-    st.caption('PORTAL EXECUTIVO · V3.4')
+    st.caption('PORTAL EXECUTIVO · V3.5')
     if '_pending_nav' in st.session_state:st.session_state['nav']=st.session_state.pop('_pending_nav')
-    nav=st.radio('Menu',['Visão Geral','DRE — Resultados','Financeiro','Comercial','Romaneios','Produção','Materiais e Estoque'],label_visibility='collapsed',key='nav')
+    nav=st.radio('Menu',['Visão Geral','DRE — Resultados','Financeiro','Comercial','Romaneios','Produção','Materiais e Estoque','Margem e Planejamento'],label_visibility='collapsed',key='nav')
     st.divider()
     if st.button('Atualizar dados agora',width='stretch'):
         load_sheet.clear();st.rerun()
     st.caption('Google Sheets · consulta a cada 5 min' if LIVE else 'Base local · demonstração sem atualização em tempo real')
-st.caption('Última extração registrada na base: '+updated())
+st.caption('Últimos dados do BI: '+updated())
 D=dre();R=realized(D)
 YEARS=sorted([int(x) for x in R.ano.dropna().unique() if x>=2021],reverse=True)
 
@@ -278,6 +278,23 @@ elif nav=='Financeiro':
 
 elif nav=='Comercial':
     st.title('Comercial · Orçamentos')
+    st.subheader('Evolução anual dos tickets médios')
+    tickets=sheet('BI_Tickets_Anuais').copy()
+    if not tickets.empty:
+        tickets['ano']=pd.to_numeric(tickets['ano'],errors='coerce')
+        tickets=tickets.dropna(subset=['ano']).sort_values('ano')
+        if len(tickets):
+            ultimo=tickets.iloc[-1]
+            cards([('Ticket orçado',money(ultimo['ticket_orcado'])),('Ticket vendido',money(ultimo['ticket_vendido'])),('Ticket instalado',money(ultimo['ticket_instalado']))])
+            fig=go.Figure()
+            for key,label,color in [('ticket_orcado','Orçado','#ad946a'),('ticket_vendido','Vendido','#305d6b'),('ticket_instalado','Instalado','#42776c')]:
+                fig.add_scatter(x=tickets.ano.astype(int).astype(str),y=pd.to_numeric(tickets[key],errors='coerce'),mode='lines+markers',name=label,line=dict(color=color,width=2.5))
+            chart(fig)
+            st.caption('Tickets calculados a partir das abas Orçam. e Receitas. Instalado = venda com instalação concluída no ano. O ano atual é parcial.')
+            with st.expander('Valores e quantidades por ano'):
+                view=tickets[['ano','quantidade_orcado','ticket_orcado','quantidade_vendido','ticket_vendido','quantidade_instalado','ticket_instalado','ano_parcial']].copy()
+                show(view,list(view.columns),height=270)
+    st.divider()
     df=sheet('BI_Orcamentos_Comercial').copy()
     st.subheader('Desempenho comercial')
     scope=st.segmented_control('Período comercial',['Mês','Ano','Histórico total'],default='Histórico total') or 'Histórico total'
@@ -352,6 +369,106 @@ elif nav=='Comercial':
             selected['valor_item']=val(selected,'valor_item').map(money)
             show(selected,['ambiente','descricao','material_original','m2_sem_quebra','m2_com_quebra','somar_no_total','valor_item'],{'ambiente':'Ambiente','descricao':'Descrição','material_original':'Material','m2_sem_quebra':'Área sem quebra (m²)','m2_com_quebra':'Área com quebra (m²)','somar_no_total':'Considerar no total','valor_item':'Valor do item (R$)'},height=390,extra_config={'Descrição':st.column_config.TextColumn('Descrição',width='medium'),'Ambiente':st.column_config.TextColumn('Ambiente',width='small'),'Material':st.column_config.TextColumn('Material',width='medium')})
             st.caption('Área não informada na origem aparece como —, sem transformar ausência de dados em zero.')
+
+elif nav=='Margem e Planejamento':
+    st.title('Margem e Planejamento')
+    st.caption('Simulação gerencial independente das abas Metas, Margem e Margem (2) do Excel. Os percentuais de Simples, reserva técnica e CPV têm como base a receita líquida (100%).')
+    params=sheet('BI_Parametros_Planejamento').copy()
+    plan=sheet('BI_Planejamento').copy()
+    if params.empty or plan.empty:
+        st.error('Bases de planejamento indisponíveis. Execute a nova automação antes de abrir esta área.')
+        st.stop()
+    def prm(key,default=0.):
+        match=params[params.indicador.astype(str)==key]
+        try:return float(match.valor.iloc[0]) if len(match) else default
+        except:return default
+    latest=params.loc[params.indicador.astype(str).eq('mes_ultimo_fechado'),'valor']
+    st.caption('Base de custos até '+(str(latest.iloc[0]) if len(latest) else 'último fechamento')+' · Sazonalidade aprovada preservada no plano original.')
+    historical=R.sort_values('mes').tail(12)
+    latest_row=historical.iloc[-1]
+    base_net=float(val(historical,'receita_liquida').sum())
+    base_month_net=float(val(historical.tail(1),'receita_liquida').iloc[0])
+    if base_net<=0:st.error('Receita líquida histórica inválida.');st.stop()
+    st.subheader('Simulador mensal de margem e lucro')
+    c1,c2,c3,c4=st.columns(4)
+    with c1: gross=st.number_input('Receita bruta simulada (R$)',min_value=0.,value=float(max(0,round(base_month_net*(1+prm('simples_sobre_liquida')+prm('reserva_tecnica_sobre_liquida')),2))),step=10000.,format='%.2f')
+    with c2:tax=st.number_input('Simples (% da líquida)',min_value=0.,max_value=100.,value=round(prm('simples_sobre_liquida')*100,3),step=.1,format='%.3f')/100
+    with c3:rt=st.number_input('Reserva técnica (% da líquida)',min_value=0.,max_value=100.,value=round(prm('reserva_tecnica_sobre_liquida')*100,3),step=.1,format='%.3f')/100
+    with c4:cpvr=st.number_input('CPV de materiais (% da líquida)',min_value=0.,max_value=100.,value=round(prm('cpv_sobre_liquida')*100,3),step=.1,format='%.3f')/100
+    a,b,c,d=st.columns(4)
+    with a:salary=st.number_input('Salários e encargos mensais (R$)',min_value=0.,value=round(prm('salarios_encargos_media_12m'),2),step=1000.,format='%.2f')
+    with b:pro=st.number_input('Pró-labore mensal (R$)',min_value=0.,value=round(prm('pro_labore_media_12m'),2),step=1000.,format='%.2f')
+    with c:opex=st.number_input('Despesas operacionais mensais (R$)',min_value=0.,value=round(prm('despesas_media_12m'),2),step=1000.,format='%.2f')
+    with d:dep=st.number_input('Depreciação mensal (R$)',min_value=0.,value=round(prm('depreciacao_base_mensal'),2),step=500.,format='%.2f')
+    a,b,c=st.columns(3)
+    with a:fin=st.number_input('Resultado financeiro mensal assinado (R$)',value=round(prm('resultado_financeiro_base_mensal'),2),step=500.,format='%.2f')
+    with b:bad=st.number_input('Baixa de clientes mensal assinada (R$)',value=round(prm('baixa_clientes_base_mensal'),2),step=500.,format='%.2f')
+    with c:desired=st.number_input('Lucro líquido mensal desejado (R$)',value=100000.,step=10000.,format='%.2f')
+    net=gross/(1+tax+rt);simples=net*tax;reserve=net*rt;material=net*cpvr
+    contrib=net-material
+    operating=contrib-salary-pro-opex-dep
+    profit=operating+fin+bad
+    margin_contrib=1-cpvr
+    fixed_oper=salary+pro+opex+dep
+    breakeven_oper=(fixed_oper/margin_contrib)*(1+tax+rt) if margin_contrib>0 else None
+    breakeven_full=((fixed_oper-fin-bad)/margin_contrib)*(1+tax+rt) if margin_contrib>0 else None
+    required=((desired+fixed_oper-fin-bad)/margin_contrib)*(1+tax+rt) if margin_contrib>0 else None
+    cards([('Receita líquida',money(net)),('Margem de contribuição',money(contrib)),('Lucro operacional',money(operating)),('Lucro líquido simulado',money(profit))])
+    cards([('Equilíbrio operacional (bruto)',money(max(0,breakeven_oper)) if breakeven_oper is not None else 'Inviável'),('Equilíbrio com financeiro (bruto)',money(max(0,breakeven_full)) if breakeven_full is not None else 'Inviável'),('Bruto para lucro desejado',money(max(0,required)) if required is not None else 'Inviável')])
+    with st.expander('DRE completa da simulação',expanded=False):
+        details=[('Receita bruta',gross),('(-) Simples Nacional',-simples),('(-) Reserva técnica',-reserve),('Receita líquida',net),('(-) CPV / materiais',-material),('Margem de contribuição',contrib),('(-) Salários e encargos',-salary),('(-) Pró-labore',-pro),('(-) Despesas operacionais',-opex),('(-) Depreciação',-dep),('Resultado financeiro',fin),('Baixa de clientes',bad),('Lucro líquido',profit)]
+        show(pd.DataFrame([{'Conta':name,'Valor':money(v),'% da receita líquida':pct(v/net*100) if net else '—'} for name,v in details]),['Conta','Valor','% da receita líquida'],height=490)
+    st.divider()
+    st.subheader('Planejamento anual e próximos 12 meses')
+    plan['mes']=pd.to_datetime(plan['mes'],errors='coerce');plan['ano']=pd.to_numeric(plan['ano'],errors='coerce').astype('Int64')
+    for col in ('meta_lucro_anual','meta_receita_bruta_anual','peso_sazonal','receita_bruta_planejada'):
+        plan[col]=pd.to_numeric(plan[col],errors='coerce')
+    years_plan=sorted(plan.ano.dropna().astype(int).unique().tolist())
+    year=st.selectbox('Exercício do planejamento',years_plan,index=0)
+    annual=plan[plan.ano.eq(year)].sort_values('mes').copy()
+    goal=float(annual.meta_lucro_anual.iloc[0]);gross_target=float(annual.meta_receita_bruta_anual.iloc[0])
+    cards([('Meta de lucro aprovada',money(goal)),('Faturamento bruto aprovado',money(gross_target)),('Sazonalidade do plano',str(int(annual.sazonalidade_ano.iloc[0])))])
+    st.caption('O plano aprovado é fixo e não muda com os ajustes do simulador. Para revisar o orçamento, edite e aprove a configuração de planejamento na automação.')
+    st.markdown('**Cenário atualizado (não altera o plano aprovado)**')
+    c1,c2,c3=st.columns(3)
+    with c1:goal_scenario=st.number_input('Meta anual de lucro para simular (R$)',value=goal,step=50000.,format='%.2f')
+    with c2:growth=st.number_input('Crescimento anual de referência (%)',value=20.,min_value=-50.,max_value=200.,step=1.)
+    with c3:salary_growth=st.number_input('Reajuste de custos fixos (%)',value=0.,min_value=-50.,max_value=200.,step=1.)/100
+    annual_salary=prm('salarios_encargos_base_mensal')*(1+salary_growth)
+    annual_pro=prm('pro_labore_base_mensal')*(1+salary_growth)
+    annual_opex=prm('despesas_base_mensal')*(1+salary_growth)
+    annual_dep=prm('depreciacao_base_mensal')
+    annual_fin=prm('resultado_financeiro_base_mensal')
+    annual_bad=prm('baixa_clientes_base_mensal')
+    fixed_annual=14*(annual_salary+annual_pro)+12*(annual_opex+annual_dep-annual_fin-annual_bad)
+    if margin_contrib<=0:st.error('O CPV simulado impede margem de contribuição positiva.');st.stop()
+    scenario_gross=max(0,(goal_scenario+fixed_annual)/margin_contrib*(1+tax+rt))
+    cards([('Bruto necessário no cenário',money(scenario_gross)),('Diferença vs. plano aprovado',money(scenario_gross-gross_target)),('Meta de lucro do ano seguinte (+ crescimento)',money(goal_scenario*(1+growth/100)))])
+    approved=annual[['mes','receita_bruta_planejada','peso_sazonal']].copy()
+    approved['Realizado fechado']=approved['mes'].map(dict(zip(R.mes,val(R,'receita_bruta'))))
+    approved['Previsão atualizada']=approved['Realizado fechado'].fillna(approved['peso_sazonal']*scenario_gross)
+    approved['Cenário mensal']=approved['peso_sazonal']*scenario_gross
+    approved['Mês']=approved.mes.dt.strftime('%m/%Y')
+    fig=go.Figure()
+    for k,label,color in [('receita_bruta_planejada','Plano aprovado','#ad946a'),('Previsão atualizada','Realizado + previsão','#305d6b'),('Cenário mensal','Cenário livre','#42776c')]:
+        fig.add_scatter(x=approved['Mês'],y=approved[k],mode='lines+markers',name=label,line=dict(color=color,width=2))
+    chart(fig)
+    table=approved[['Mês','receita_bruta_planejada','Realizado fechado','Previsão atualizada','Cenário mensal']].copy()
+    for k in table.columns[1:]:table[k]=table[k].map(lambda x:money(x) if pd.notna(x) else '—')
+    show(table,list(table.columns),{'receita_bruta_planejada':'Plano aprovado'},height=460)
+    st.caption('Meses fechados substituem a previsão somente na coluna atualizada. O plano original não é alterado; meses futuros seguem a distribuição sazonal do cenário.')
+    st.subheader('Janela móvel de 12 meses')
+    available=plan[plan.mes.notna()].sort_values('mes')
+    last_close=R.mes.max()
+    next_month=(last_close.to_period('M')+1).to_timestamp()
+    rolling=available[(available.mes>=next_month)&(available.mes<next_month+pd.DateOffset(months=12))].copy()
+    if len(rolling):
+        rolling['Mês']=rolling.mes.dt.strftime('%m/%Y')
+        rolling['Plano aprovado']=rolling.receita_bruta_planejada.map(money)
+        show(rolling,['Mês','ano','Plano aprovado'],{'ano':'Exercício'},height=460)
+        st.metric('Total bruto da janela móvel (planos anuais respectivos)',money(rolling.receita_bruta_planejada.sum()))
+        st.caption('Cada mês usa o plano do próprio ano civil. O orçamento anual de 2027 não é comprimido nos primeiros dez meses.')
+    else:st.info('A janela móvel ultrapassa os anos disponíveis no planejamento. Amplie os anos no arquivo aprovado.')
 
 elif nav=='Romaneios':
     st.title('Romaneio de Produção e Entrega')
@@ -576,4 +693,3 @@ elif nav=='Materiais e Estoque':
     if f.empty:st.info('Não há demanda pendente de materiais para os filtros selecionados.')
     for k in ['demanda_pendente_m2','estoque_material_m2','necessidade_teorica_m2','saldo_material_m2']:f[k]=val(f,k).map(lambda z:num(z,1))
     show(f,['material','demanda_pendente_m2','estoque_material_m2','necessidade_teorica_m2','saldo_material_m2'],{'material':'Material','demanda_pendente_m2':'Demanda pendente (m²)','estoque_material_m2':'Estoque de material (m²)','necessidade_teorica_m2':'Necessidade de compra (m²)','saldo_material_m2':'Saldo de material (m²)'},height=470)
-
