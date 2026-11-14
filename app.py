@@ -195,7 +195,7 @@ def chart(fig):
 
 with st.sidebar:
     st.image(str(ROOT/'logo_granart.png'),width='stretch')
-    st.caption('PORTAL EXECUTIVO · V3.5')
+    st.caption('PORTAL EXECUTIVO · V3.6')
     if '_pending_nav' in st.session_state:st.session_state['nav']=st.session_state.pop('_pending_nav')
     nav=st.radio('Menu',['Visão Geral','DRE — Resultados','Financeiro','Comercial','Romaneios','Produção','Materiais e Estoque','Margem e Planejamento'],label_visibility='collapsed',key='nav')
     st.divider()
@@ -211,7 +211,7 @@ if nav=='Visão Geral':
     y=st.selectbox('Período',YEARS)
     p=period(R,y);t=total(p)
     st.markdown(f'<div class="period"><b>ACUMULADO {y}</b> · {period_name(p,y)} · {len(p)} meses fechados</div>',unsafe_allow_html=True)
-    cards([('Receita bruta',compact(t['receita_bruta'])),('Receita líquida',compact(t['receita_liquida'])),('CPV',compact(abs(t['cpv'])))])
+    cards([('Receita Bruta',compact(t['receita_bruta'])),('Receita Líquida',compact(t['receita_liquida'])),('CPV',compact(abs(t['cpv'])))])
     cards([('Lucro bruto',compact(t['lucro_bruto'])),('Margem bruta',pct(100*t['lucro_bruto']/t['receita_liquida']) if t['receita_liquida'] else '—'),('Lucro líquido',compact(t['lucro_liquido'])),('Margem líquida',pct(100*t['lucro_liquido']/t['receita_liquida']) if t['receita_liquida'] else '—')])
 
     st.subheader('Acesso rápido')
@@ -236,7 +236,7 @@ elif nav=='DRE — Resultados':
 
     t=total(p)
     estimated=mode=='Mês atual — Previsão'
-    cards([(label+(' estimada' if estimated and label not in ('CPV','Lucro bruto','Lucro líquido') else ' estimado' if estimated else ''),value) for label,value in [('Receita líquida',compact(t['receita_liquida'])),('CPV',compact(t['cpv'])),('Lucro bruto',compact(t['lucro_bruto'])),('Lucro líquido',compact(t['lucro_liquido'])),('Margem líquida',pct(100*t['lucro_liquido']/t['receita_liquida']) if t['receita_liquida'] else '—')]])
+    cards([(label+(' estimada' if estimated and label not in ('CPV','Lucro bruto','Lucro líquido') else ' estimado' if estimated else ''),value) for label,value in [('Receita Líquida',compact(t['receita_liquida'])),('CPV',compact(t['cpv'])),('Lucro bruto',compact(t['lucro_bruto'])),('Lucro líquido',compact(t['lucro_liquido'])),('Margem líquida',pct(100*t['lucro_liquido']/t['receita_liquida']) if t['receita_liquida'] else '—')]])
     previous=None;prev_t=None;prev_label=None
     if mode=='Comparar' and y>2021:
         months=sorted(p.nmes.dropna().astype(int).unique())
@@ -271,7 +271,7 @@ elif nav=='DRE — Resultados':
         st.subheader('Receita, CPV e resultados mensais')
         monthly=p.sort_values('mes') if mode=='Mês atual — Previsão' else R[R.ano==y].sort_values('mes')
         fig=go.Figure()
-        for k,name,color in [('receita_liquida','Receita líquida','#b08b43'),('cpv','CPV (magnitude)','#b34b4b'),('lucro_bruto','Lucro bruto','#288678'),('lucro_liquido','Lucro líquido','#3a548e')]:
+        for k,name,color in [('receita_liquida','Receita Líquida','#b08b43'),('cpv','CPV (magnitude)','#b34b4b'),('lucro_bruto','Lucro bruto','#288678'),('lucro_liquido','Lucro líquido','#3a548e')]:
             values=val(monthly,k).abs() if k=='cpv' else val(monthly,k)
             fig.add_scatter(x=monthly.mes.dt.strftime('%m/%Y'),y=values,mode='lines+markers',name=name,line=dict(color=color,width=2.5))
         chart(fig)
@@ -393,167 +393,191 @@ elif nav=='Comercial':
 
 elif nav=='Margem e Planejamento':
     st.title('Margem e Planejamento')
-    st.caption('Simulação gerencial independente das abas Metas, Margem e Margem (2) do Excel. Os percentuais de Simples, reserva técnica e CPV têm como base a receita líquida (100%).')
     params=sheet('BI_Parametros_Planejamento').copy()
     plan=sheet('BI_Planejamento').copy()
     if params.empty or plan.empty:
-        st.error('Bases de planejamento indisponíveis. Execute a nova automação antes de abrir esta área.')
-        st.stop()
+        st.error('Bases de planejamento indisponíveis. Execute a automação V3.6.1 antes de abrir esta área.');st.stop()
+    pdict=dict(zip(params.indicador.astype(str),params.valor))
     def prm(key,default=0.):
-        match=params[params.indicador.astype(str)==key]
-        try:return float(match.valor.iloc[0]) if len(match) else default
-        except:return default
-    latest=params.loc[params.indicador.astype(str).eq('mes_ultimo_fechado'),'valor']
-    st.caption('Base de custos até '+(str(latest.iloc[0]) if len(latest) else 'último fechamento')+' · Sazonalidade aprovada preservada no plano original.')
+        try:return float(pdict.get(key,default))
+        except (TypeError,ValueError):return default
+    def plan_prm(y,key,default=None):
+        k=f'plano_{y}_{key}'
+        if k not in pdict:raise ValueError(f'Premissa original ausente: {k}. Publique a base V3.6.1.')
+        return prm(k)
+    def calculo(bruto,tax,rt,cpv,sal,pro,desp,dep,fin,bad):
+        net=bruto/(1+tax+rt)
+        mat=net*cpv
+        contrib=net-mat
+        op=contrib-sal-pro-desp-dep
+        return {'receita_bruta':bruto,'simples':-net*tax,'reserva_tecnica':-net*rt,'receita_liquida':net,'cpv':-mat,'lucro_bruto':contrib,'despesas':-desp,'salarios_encargos':-sal,'pro_labore':-pro,'depreciacao':-dep,'resultado_financeiro':fin,'baixa_clientes':bad,'lucro_liquido':op+fin+bad,'operacional':op}
+    def necessario(lucro,meses,tax,rt,cpv,sal,pro,desp,dep,fin,bad):
+        if 1-cpv<=0:return None
+        fixo=sal+pro+desp+dep-fin-bad
+        return (lucro+meses*fixo)/(1-cpv)*(1+tax+rt)
+    tax0=prm('simples_sobre_liquida');rt0=prm('reserva_tecnica_sobre_liquida');cpv0=prm('cpv_sobre_liquida')
+    sal0=prm('salarios_encargos_media_12m');pro0=prm('pro_labore_media_12m');desp0=prm('despesas_media_12m')
+    dep0=prm('depreciacao_base_mensal');fin0=prm('resultado_financeiro_base_mensal');bad0=prm('baixa_clientes_base_mensal')
+    st.subheader('Simulador de lucro')
+    a,b=st.columns(2)
+    with a:desired=moeda_editavel('Lucro líquido mensal desejado (R$)',100000.,'sim_desejado')
+    req0=necessario(desired,1,tax0,rt0,cpv0,sal0,pro0,desp0,dep0,fin0,bad0)
+    with b:st.metric('Receita Bruta necessária',money(max(0,req0)) if req0 is not None and req0>=0 else ('Sem receita adicional necessária' if req0 is not None else 'Inviável'))
+    st.subheader('Simulador mensal de margem')
     historical=R.sort_values('mes').tail(12)
-    latest_row=historical.iloc[-1]
-    base_net=float(val(historical,'receita_liquida').sum())
-    base_month_net=float(val(historical.tail(1),'receita_liquida').iloc[0])
-    if base_net<=0:st.error('Receita líquida histórica inválida.');st.stop()
-    st.subheader('Simulador mensal de margem e lucro')
-    st.caption('Valores em reais, com separador de milhares. Para alterar, digite o valor e pressione Enter.')
+    base_net=float(val(historical.tail(1),'receita_liquida').iloc[0]) if len(historical) else 0.
     c1,c2,c3,c4=st.columns(4)
-    with c1: gross=moeda_editavel('Receita bruta simulada (R$)',float(max(0,round(base_month_net*(1+prm('simples_sobre_liquida')+prm('reserva_tecnica_sobre_liquida')),2))),'sim_bruto')
-    with c2:tax=st.number_input('Simples (% da líquida)',min_value=0.,max_value=100.,value=round(prm('simples_sobre_liquida')*100,3),step=.1,format='%.3f')/100
-    with c3:rt=st.number_input('Reserva técnica (% da líquida)',min_value=0.,max_value=100.,value=round(prm('reserva_tecnica_sobre_liquida')*100,3),step=.1,format='%.3f')/100
-    with c4:cpvr=st.number_input('CPV de materiais (% da líquida)',min_value=0.,max_value=100.,value=round(prm('cpv_sobre_liquida')*100,3),step=.1,format='%.3f')/100
+    with c1:gross=moeda_editavel('Receita Bruta simulada (R$)',max(0,base_net*(1+tax0+rt0)),'sim_bruto')
+    with c2:tax=st.number_input('Simples (% da líquida)',min_value=0.,max_value=100.,value=round(tax0*100,3),step=.1,format='%.3f')/100
+    with c3:rt=st.number_input('Reserva técnica (% da líquida)',min_value=0.,max_value=100.,value=round(rt0*100,3),step=.1,format='%.3f')/100
+    with c4:cpvr=st.number_input('CPV de materiais (% da líquida)',min_value=0.,max_value=100.,value=round(cpv0*100,3),step=.1,format='%.3f')/100
     a,b,c,d=st.columns(4)
-    with a:salary=moeda_editavel('Salários e encargos mensais (R$)',prm('salarios_encargos_media_12m'),'sim_salarios')
-    with b:pro=moeda_editavel('Pró-labore mensal (R$)',prm('pro_labore_media_12m'),'sim_pro')
-    with c:opex=moeda_editavel('Despesas operacionais mensais (R$)',prm('despesas_media_12m'),'sim_desp')
-    with d:dep=moeda_editavel('Depreciação mensal (R$)',prm('depreciacao_base_mensal'),'sim_dep')
-    a,b,c=st.columns(3)
-    with a:fin=moeda_editavel('Resultado financeiro mensal assinado (R$)',prm('resultado_financeiro_base_mensal'),'sim_fin')
-    with b:bad=moeda_editavel('Baixa de clientes mensal assinada (R$)',prm('baixa_clientes_base_mensal'),'sim_baixa')
-    with c:desired=moeda_editavel('Lucro líquido mensal desejado (R$)',100000.,'sim_desejado')
-    net=gross/(1+tax+rt);simples=net*tax;reserve=net*rt;material=net*cpvr
-    contrib=net-material
-    operating=contrib-salary-pro-opex-dep
-    profit=operating+fin+bad
-    margin_contrib=1-cpvr
-    fixed_oper=salary+pro+opex+dep
-    breakeven_oper=(fixed_oper/margin_contrib)*(1+tax+rt) if margin_contrib>0 else None
-    breakeven_full=((fixed_oper-fin-bad)/margin_contrib)*(1+tax+rt) if margin_contrib>0 else None
-    required=((desired+fixed_oper-fin-bad)/margin_contrib)*(1+tax+rt) if margin_contrib>0 else None
-    cards([('Receita líquida',money(net)),('Margem de contribuição',money(contrib)),('Lucro operacional',money(operating)),('Lucro líquido simulado',money(profit))])
-    cards([('Equilíbrio operacional (bruto)',money(max(0,breakeven_oper)) if breakeven_oper is not None else 'Inviável'),('Equilíbrio com financeiro (bruto)',money(max(0,breakeven_full)) if breakeven_full is not None else 'Inviável'),('Bruto para lucro desejado',money(max(0,required)) if required is not None else 'Inviável')])
-    with st.expander('DRE completa da simulação',expanded=False):
-        details=[('Receita bruta',gross),('(-) Simples Nacional',-simples),('(-) Reserva técnica',-reserve),('Receita líquida',net),('(-) CPV / materiais',-material),('Margem de contribuição',contrib),('(-) Salários e encargos',-salary),('(-) Pró-labore',-pro),('(-) Despesas operacionais',-opex),('(-) Depreciação',-dep),('Resultado financeiro',fin),('Baixa de clientes',bad),('Lucro líquido',profit)]
-        show(pd.DataFrame([{'Conta':name,'Valor':money(v),'% da receita líquida':pct(v/net*100) if net else '—'} for name,v in details]),['Conta','Valor','% da receita líquida'],height=490)
+    with a:salary=moeda_editavel('Salários e encargos mensais (R$)',sal0,'sim_salarios')
+    with b:pro=moeda_editavel('Pró-labore mensal (R$)',pro0,'sim_pro')
+    with c:opex=moeda_editavel('Despesas operacionais mensais (R$)',desp0,'sim_desp')
+    with d:dep=moeda_editavel('Depreciação mensal (R$)',dep0,'sim_dep')
+    a,b=st.columns(2)
+    with a:fin=moeda_editavel('Resultado financeiro mensal (R$)',fin0,'sim_fin')
+    with b:bad=moeda_editavel('Baixa de clientes mensal (R$)',bad0,'sim_baixa')
+    sim=calculo(gross,tax,rt,cpvr,salary,pro,opex,dep,fin,bad)
+    eq_oper=necessario(0,1,tax,rt,cpvr,salary,pro,opex,dep,0,0)
+    eq_full=necessario(0,1,tax,rt,cpvr,salary,pro,opex,dep,fin,bad)
+    cards([('Receita Líquida',money(sim['receita_liquida'])),('Margem de contribuição',money(sim['lucro_bruto'])),('Lucro operacional',money(sim['operacional'])),('Lucro líquido simulado',money(sim['lucro_liquido']))])
+    cards([('Equilíbrio operacional',money(max(0,eq_oper)) if eq_oper is not None else 'Inviável'),('Equilíbrio com financeiro',money(max(0,eq_full)) if eq_full is not None else 'Inviável')])
+    with st.expander('DRE da simulação de margem'):
+        dre_keys=[('Receita Bruta','receita_bruta'),('(-) Simples','simples'),('(-) Reserva técnica','reserva_tecnica'),('Receita Líquida','receita_liquida'),('(-) CPV','cpv'),('Margem de contribuição','lucro_bruto'),('(-) Salários e encargos','salarios_encargos'),('(-) Pró-labore','pro_labore'),('(-) Despesas operacionais','despesas'),('(-) Depreciação','depreciacao'),('Resultado financeiro','resultado_financeiro'),('Baixa de clientes','baixa_clientes'),('Lucro líquido','lucro_liquido')]
+        show(pd.DataFrame([{'Conta':name,'Valor':money(sim[k]),'% da Receita Líquida':pct(100*sim[k]/sim['receita_liquida']) if sim['receita_liquida'] else '—'} for name,k in dre_keys]),['Conta','Valor','% da Receita Líquida'],height=490)
     st.divider()
-    st.subheader('Planejamento anual e próximos 12 meses')
+    st.subheader('Planejamento anual')
     def parse_plan_month(v):
         t=str(v).strip()
-        if not t or t.lower() in ('nan','none'):return pd.NaT
         if re.fullmatch(r'\d{4}-\d{2}(?:-\d{2})?',t):return pd.to_datetime(t[:7],format='%Y-%m',errors='coerce')
         try:
             n=float(t)
             if 30000<n<80000:return pd.Timestamp('1899-12-30')+pd.to_timedelta(n,unit='D')
         except (ValueError,TypeError):pass
         return pd.to_datetime(t,dayfirst=True,errors='coerce')
-    plan['mes']=plan['mes'].map(parse_plan_month).dt.to_period('M').dt.to_timestamp()
-    plan['ano']=plan['mes'].dt.year.astype('Int64')
-    for col in ('meta_lucro_anual','meta_receita_bruta_anual','peso_sazonal','receita_bruta_planejada'):
-        plan[col]=pd.to_numeric(plan[col],errors='coerce')
+    plan['mes']=plan.mes.map(parse_plan_month).dt.to_period('M').dt.to_timestamp()
+    plan['ano']=plan.mes.dt.year.astype('Int64')
+    for k in ('meta_lucro_anual','meta_receita_bruta_anual','peso_sazonal','receita_bruta_planejada'):
+        plan[k]=pd.to_numeric(plan[k],errors='coerce')
     years_plan=sorted(plan.ano.dropna().astype(int).unique().tolist())
-    if not years_plan:
-        st.error('Nenhum exercício válido encontrado na base BI_Planejamento.');st.stop()
-    year=st.selectbox('Exercício do planejamento',years_plan,index=0)
+    if not years_plan:st.error('Planejamento sem exercícios válidos.');st.stop()
+    year=st.selectbox('Exercício do planejamento',years_plan)
     annual=plan[plan.ano.eq(year)].sort_values('mes').copy()
-    if annual.empty:st.error('Planejamento do exercício indisponível.');st.stop()
+    if len(annual)!=12:st.error('Planejamento incompleto para este exercício.');st.stop()
     goal=float(annual.meta_lucro_anual.iloc[0]);gross_target=float(annual.meta_receita_bruta_anual.iloc[0])
-    # Preserva os pesos trimestrais aprovados, mas distribui igualmente entre os 3 meses.
-    pesos=pd.to_numeric(annual.peso_sazonal,errors='coerce').fillna(0).to_numpy()
-    if len(pesos)!=12 or pesos.sum()<=0:st.error('Pesos sazonais inválidos.');st.stop()
-    pesos=pesos/pesos.sum()
-    pesos_trimestrais=[sum(pesos[q:q+3]) for q in (0,3,6,9)]
-    pesos_iguais=[pesos_trimestrais[q//3]/3 for q in range(12)]
-    annual['peso_igual']=pesos_iguais
+    weights=annual.peso_sazonal.fillna(0).to_numpy()
+    if weights.sum()<=0:st.error('Sazonalidade inválida.');st.stop()
+    weights=weights/weights.sum()
+    quarterly=[sum(weights[q:q+3]) for q in (0,3,6,9)]
+    annual['peso_igual']=[quarterly[q//3]/3 for q in range(12)]
     annual['meta_mensal']=gross_target*annual.peso_igual
-    annual['trimestre']=((annual.mes.dt.month-1)//3+1)
-    # Fonte de realizado: somente meses efetivamente fechados na DRE.
+    original_rates=[plan_prm(year,k) for k in ('simples_sobre_liquida','rt_sobre_liquida','cpv_sobre_liquida')]
+    original_costs=[plan_prm(year,k) for k in ('salarios_encargos','pro_labore','despesas','depreciacao','resultado_financeiro','baixa_clientes')]
+    prev=[calculo(float(row.meta_mensal),*original_rates,*original_costs) for row in annual.itertuples()]
     fechados=R[R.mes.dt.year.eq(year)].copy()
     bruto_real=dict(zip(fechados.mes.dt.to_period('M'),val(fechados,'receita_bruta')))
     lucro_real=dict(zip(fechados.mes.dt.to_period('M'),val(fechados,'lucro_liquido')))
     annual['realizado']=annual.mes.dt.to_period('M').map(bruto_real)
     annual['lucro_realizado']=annual.mes.dt.to_period('M').map(lucro_real)
     fechado=annual.realizado.notna()
+    aberto=~fechado
     bruto_acumulado=float(annual.loc[fechado,'realizado'].sum())
     lucro_acumulado=float(annual.loc[fechado,'lucro_realizado'].sum())
-    peso_fechado=float(annual.loc[fechado,'peso_igual'].sum())
-    tendencia_bruta=(bruto_acumulado/peso_fechado) if peso_fechado>0 else None
-    # Meta reprogramada para os meses abertos; não modifica o plano original.
-    peso_aberto=float(annual.loc[~fechado,'peso_igual'].sum())
     falta_bruto=max(0,gross_target-bruto_acumulado)
-    annual['meta_recalculada']=annual['meta_mensal']
-    if peso_aberto>0:
-        annual.loc[~fechado,'meta_recalculada']=annual.loc[~fechado,'peso_igual']*falta_bruto/peso_aberto
-    annual.loc[fechado,'meta_recalculada']=float('nan')
-    annual['pct_meta']=annual.realizado/annual.meta_mensal*100
-    # DRE projetada usa as premissas financeiras atuais e custo extra de 50% em nov/dez.
-    annual_salary=prm('salarios_encargos_base_mensal')
-    annual_pro=prm('pro_labore_base_mensal')
-    annual_opex=prm('despesas_base_mensal')
-    annual_dep=prm('depreciacao_base_mensal')
-    annual_fin=prm('resultado_financeiro_base_mensal')
-    annual_bad=prm('baixa_clientes_base_mensal')
-    # As taxas são baseadas na receita líquida (100%).
-    def dre_projetada(bruto,mes):
-        liquida=bruto/(1+tax+rt)
-        fator=1.5 if mes in (11,12) else 1.
-        return {'receita_bruta':bruto,'simples':-liquida*tax,'reserva_tecnica':-liquida*rt,'receita_liquida':liquida,'cpv':-liquida*cpvr,'lucro_bruto':liquida*(1-cpvr),'despesas':-annual_opex,'salarios_encargos':-annual_salary*fator,'pro_labore':-annual_pro*fator,'depreciacao':-annual_dep,'resultado_financeiro':annual_fin,'baixa_clientes':annual_bad,'lucro_liquido':liquida*(1-cpvr)-annual_opex-(annual_salary+annual_pro)*fator-annual_dep+annual_fin+annual_bad}
-    previsto=[dre_projetada(float(r.meta_mensal),int(r.mes.month)) for r in annual.itertuples()]
-    futuro=[dre_projetada(float(r.meta_mensal),int(r.mes.month)) for r in annual.itertuples()]
-    annual['lucro_meta']= [r['lucro_liquido'] for r in previsto]
-    annual['lucro_tendencia']=annual['lucro_realizado'].where(fechado,pd.Series([r['lucro_liquido'] for r in futuro],index=annual.index))
+    peso_fechado=float(annual.loc[fechado,'peso_igual'].sum())
+    tendencia_bruta=bruto_acumulado/peso_fechado if peso_fechado>0 else None
+    # Meta Recalculada: lucro restante + custos dos meses abertos, nunca só saldo bruto.
+    n_open=int(aberto.sum())
+    total_necessario=necessario(goal-lucro_acumulado,n_open,tax0,rt0,cpv0,sal0,pro0,desp0,dep0,fin0,bad0) if n_open else 0.
+    annual['meta_recalculada']=float('nan')
+    peso_aberto=float(annual.loc[aberto,'peso_igual'].sum())
+    if n_open and total_necessario is not None and peso_aberto>0:
+        annual.loc[aberto,'meta_recalculada']=max(0,total_necessario)*annual.loc[aberto,'peso_igual']/peso_aberto
+    # Tendência independente da meta recalculada: mantém a projeção original para meses abertos.
+    future=[calculo(float(row.meta_mensal),*original_rates,*original_costs) for row in annual.itertuples()]
+    annual['lucro_meta']=[v['lucro_liquido'] for v in prev]
+    annual['lucro_tendencia']=annual['lucro_realizado'].where(fechado,pd.Series([v['lucro_liquido'] for v in future],index=annual.index))
+    # Parcial do mês atual: somente DRE_Mensal, não a previsão gerencial.
+    parcial_mes=None;parcial_bruto=None
+    try:
+        raw=sheet('DRE_Mensal').copy();raw['mes']=pd.to_datetime(raw.mes,errors='coerce')
+        raw=raw[(raw.mes.dt.year==year)&raw.situacao.fillna('').astype(str).str.casefold().eq('em andamento')]
+        if len(raw):
+            row=raw.sort_values('mes').iloc[-1]
+            v=pd.to_numeric(pd.Series([row.get('receita_bruta')]),errors='coerce').iloc[0]
+            if pd.notna(v):parcial_mes=row.mes.to_period('M');parcial_bruto=float(v)
+    except Exception:pass
+    annual['parcial']=annual.mes.dt.to_period('M').map({parcial_mes:parcial_bruto} if parcial_mes is not None else {})
+    annual['pct_meta']=annual.realizado.where(fechado,annual.parcial)/annual.meta_mensal*100
     st.markdown('**Resumo do exercício**')
-    cards([('Meta de lucro anual',money(goal)),('Faturamento bruto planejado',money(gross_target)),('Receita bruta realizada',money(bruto_acumulado)),('Falta faturar para a meta',money(falta_bruto))])
-    cards([('Lucro realizado',money(lucro_acumulado)),('Tendência de faturamento pela sazonalidade',money(tendencia_bruta) if tendencia_bruta is not None else 'Sem meses fechados'),('Tendência de lucro (realizado + previsto)',money(annual.lucro_tendencia.sum())),('Sazonalidade de referência',str(int(annual.sazonalidade_ano.iloc[0])))])
-    st.caption('O plano anual permanece fixo. A tendência de faturamento usa o peso sazonal dos meses fechados; a tendência de lucro soma a DRE realizada aos meses futuros projetados.')
+    cards([('Meta de lucro anual',money(goal)),('Meta de Receita Bruta',money(gross_target)),('Receita Bruta Realizada',money(bruto_acumulado)),('Receita Bruta a Realizar',money(falta_bruto))])
+    cards([('Lucro realizado',money(lucro_acumulado)),('Tendência de Receita Bruta',money(tendencia_bruta) if tendencia_bruta is not None else 'Sem meses fechados'),('Tendência de Lucro Líquido',money(annual.lucro_tendencia.sum())),('Ano-base',str(int(annual.sazonalidade_ano.iloc[0])))])
+    state=str(pdict.get(f'plano_{year}_estado','')).strip()
+    with st.expander('ⓘ  Como esta meta foi calculada · premissas do exercício',expanded=False):
+        base_y=int(plan_prm(year,'ano_base'))
+        g=plan_prm(year,'crescimento_orcamentario')
+        prev_goal=plan_prm(year,'meta_lucro_ano_anterior')
+        st.markdown(f'**Exercício {year} · ano-base {base_y} · plano {"congelado" if state=="congelado" else "preliminar"}**')
+        st.caption('Premissas exclusivas deste exercício: nunca são substituídas por resultados de anos posteriores. O plano preliminar é atualizado até o fechamento integral do ano imediatamente anterior ao exercício; então fica congelado.')
+        st.markdown(f'**Meta de lucro:** {money(prev_goal)} × (1 + {pct(g*100)}) = **{money(goal)}**. Para 2026, a referência é a meta de 2025 (R$ 800 mil), não o lucro efetivo de 2025.')
+        st.markdown(f'**Fonte:** 12 meses fechados de janeiro a dezembro de {base_y}, extraídos da DRE mensal. Nenhum mês posterior ao ano-base entra na meta original.')
+        detail=[]
+        for label,key in [('Simples Nacional','simples_sobre_liquida'),('Reserva técnica','rt_sobre_liquida'),('CPV de materiais','cpv_sobre_liquida')]:
+            v=plan_prm(year,key)
+            detail.append({'Indicador':label,'Base fechada':pct(v*100),'Regra aplicada':'Manter taxa ponderada sobre Receita Líquida','Premissa anual':pct(v*100)})
+        for label,key in [('Despesas operacionais','despesas'),('Salários e encargos','salarios_encargos'),('Pró-labore','pro_labore'),('Depreciação','depreciacao')]:
+            v=plan_prm(year,'base_'+key)*12
+            projected=plan_prm(year,key)*12
+            detail.append({'Indicador':label,'Base fechada':money(v),'Regra aplicada':f'Aumentar {pct(g*100)} sobre o ano-base','Premissa anual':money(projected)})
+        fin_base=plan_prm(year,'base_resultado_financeiro')*12
+        fin_projected=plan_prm(year,'resultado_financeiro')*12
+        detail.append({'Indicador':'Resultado financeiro','Base fechada':money(fin_base),'Regra aplicada':f'Negativo: ampliar despesa {pct(g*100)}; positivo: manter valor','Premissa anual':money(fin_projected)})
+        detail.append({'Indicador':'Baixa de clientes','Base fechada':money(plan_prm(year,'base_baixa_clientes')*12),'Regra aplicada':'Zerar previsão','Premissa anual':money(0)})
+        st.dataframe(pd.DataFrame(detail),hide_index=True,width='stretch')
+        st.markdown(f'**Resultado:** Receita Bruta anual de **{money(gross_target)}** para lucro líquido de **{money(goal)}**.')
+        st.caption('Cálculo: Receita Líquida necessária = (meta de lucro + despesas anuais projetadas − resultado financeiro) ÷ (1 − taxa CPV). Receita Bruta = Receita Líquida × (1 + taxa Simples + taxa RT). Os pesos sazonais do ano-base distribuem a receita pelos trimestres e igualmente pelos meses de cada trimestre. O reajuste anual dos custos não é reaplicado mês a mês.')
+        if year==2026:st.info('2026: reconstrução retrospectiva feita com dados fechados de 2025; não representa aprovação formal ocorrida em janeiro de 2026.')
+    if state=='preliminar':st.caption('Planejamento preliminar — será consolidado após o fechamento do ano anterior.')
+    if year==2026:st.caption('Plano original de 2026 reconstruído retrospectivamente com dados de 2025.')
+    if total_necessario is None:st.error('Meta Recalculada inviável: CPV igual ou superior à Receita Líquida.')
+    elif total_necessario<0 and n_open:st.info('O lucro acumulado já permite atingir a meta sem Receita Bruta adicional, consideradas as despesas futuras.')
     st.subheader('Acompanhamento mensal')
-    st.caption('Metas iguais nos três meses de cada trimestre. A meta recalculada redistribui o saldo anual somente entre os meses abertos, conforme os pesos dos trimestres restantes.')
-    tabela=pd.DataFrame({'Mês':annual.mes.dt.strftime('%m/%Y'),'Meta bruta':annual.meta_mensal,'Realizado':annual.realizado,'% realizado':annual.pct_meta,'Meta recalculada':annual.meta_recalculada,'Lucro meta projetado':annual.lucro_meta,'Lucro realizado':annual.lucro_realizado,'Diferença do lucro':annual.lucro_realizado-annual.lucro_meta})
-    for c in ['Meta bruta','Realizado','Meta recalculada','Lucro meta projetado','Lucro realizado','Diferença do lucro']:
-        tabela[c]=tabela[c].map(lambda v:money(v) if pd.notna(v) else '—')
-    tabela['% realizado']=tabela['% realizado'].map(lambda v:pct(v) if pd.notna(v) else '—')
-    st.dataframe(tabela,hide_index=True,width='stretch',height=465)
+    annual['exibido']=annual.realizado.where(fechado,annual.parcial)
+    table=pd.DataFrame({'Mês':annual.mes.dt.strftime('%m/%Y'),'Meta original':annual.meta_mensal,'Receita Bruta Realizada':annual.exibido,'% da meta':annual.pct_meta,'Meta Recalculada':annual.meta_recalculada,'Lucro original':annual.lucro_meta,'Lucro realizado':annual.lucro_realizado,'Diferença de lucro':annual.lucro_realizado-annual.lucro_meta})
+    table.loc[annual.parcial.notna() & ~fechado,'Mês']=table.loc[annual.parcial.notna() & ~fechado,'Mês']+' (parcial)'
+    total_exibido=float(annual.exibido.sum(skipna=True))
+    row={'Mês':'TOTAL','Meta original':gross_target,'Receita Bruta Realizada':total_exibido,'% da meta':100*total_exibido/gross_target if gross_target else float('nan'),'Meta Recalculada':float(annual.meta_recalculada.sum(skipna=True)) if n_open else float('nan'),'Lucro original':float(annual.lucro_meta.sum()),'Lucro realizado':lucro_acumulado,'Diferença de lucro':lucro_acumulado-float(annual.loc[fechado,'lucro_meta'].sum())}
+    table=pd.concat([table,pd.DataFrame([row])],ignore_index=True)
+    for k in ['Meta original','Receita Bruta Realizada','Meta Recalculada','Lucro original','Lucro realizado','Diferença de lucro']:
+        table[k]=table[k].map(lambda v:money(v) if pd.notna(v) else '—')
+    table['% da meta']=table['% da meta'].map(lambda v:pct(v) if pd.notna(v) else '—')
+    st.dataframe(table,hide_index=True,width='stretch',height=490)
+    if parcial_mes is not None:st.caption('TOTAL de Receita Bruta inclui o mês parcial identificado; lucro realizado considera apenas meses fechados.')
     fig=go.Figure()
     fig.add_scatter(x=annual.mes.dt.strftime('%m/%Y'),y=annual.meta_mensal,mode='lines+markers',name='Meta original',line=dict(color='#ad946a'))
-    fig.add_scatter(x=annual.mes.dt.strftime('%m/%Y'),y=annual.realizado,mode='lines+markers',name='Realizado',line=dict(color='#305d6b'))
-    fig.add_scatter(x=annual.mes.dt.strftime('%m/%Y'),y=annual.meta_recalculada,mode='lines+markers',name='Meta recalculada',line=dict(color='#42776c',dash='dash'))
+    fig.add_scatter(x=annual.mes.dt.strftime('%m/%Y'),y=annual.realizado,mode='lines+markers',name='Realizado fechado',line=dict(color='#305d6b'))
+    fig.add_scatter(x=annual.mes.dt.strftime('%m/%Y'),y=annual.meta_recalculada,mode='lines+markers',name='Meta Recalculada',line=dict(color='#42776c',dash='dash'))
     chart(fig)
-    st.subheader('DRE anual — previsto, realizado e tendência')
-    dre_linhas=[('Receita bruta','receita_bruta'),('(-) Simples Nacional','simples'),('(-) Reserva técnica','reserva_tecnica'),('Receita líquida','receita_liquida'),('(-) CPV de materiais','cpv'),('Margem de contribuição','lucro_bruto'),('(-) Despesas operacionais','despesas'),('(-) Salários e encargos','salarios_encargos'),('(-) Pró-labore','pro_labore'),('(-) Depreciação','depreciacao'),('Resultado financeiro','resultado_financeiro'),('Baixa de clientes','baixa_clientes'),('Lucro líquido','lucro_liquido')]
-    tabela_dre=[]
-    for nome,k in dre_linhas:
-        prev=sum(m[k] for m in previsto)
-        real=float(val(fechados,k).sum())
-        tend=real+sum(futuro[i][k] for i in range(len(futuro)) if not bool(fechado.iloc[i]))
-        tabela_dre.append({'Conta':nome,'Previsto anual':money(prev),'Realizado fechado':money(real),'Tendência de fechamento':money(tend)})
-    st.dataframe(pd.DataFrame(tabela_dre),hide_index=True,width='stretch',height=500)
-    st.caption('Previsto: premissas atuais aplicadas ao plano anual. Realizado: DRE dos meses fechados. Tendência: realizado + meses futuros com sazonalidade e custos previstos.')
-    with st.expander('Simular outro cenário (não altera o plano)',expanded=False):
-        st.caption('Este teste não grava alterações nas metas anuais aprovadas.')
-        c1,c2=st.columns(2)
-        with c1:goal_scenario=moeda_editavel('Meta de lucro para simular (R$)',goal,'cenario_lucro_'+str(year))
-        with c2:salary_growth=st.number_input('Reajuste dos custos fixos (%)',value=0.,min_value=-50.,max_value=200.,step=1.,key='cenario_reajuste_'+str(year))/100
-        fixo=14*(annual_salary+annual_pro)*(1+salary_growth)+12*(annual_opex*(1+salary_growth)+annual_dep-annual_fin-annual_bad)
-        if 1-cpvr>0:
-            scenario_gross=max(0,(goal_scenario+fixo)/(1-cpvr)*(1+tax+rt))
-            cards([('Faturamento bruto necessário',money(scenario_gross)),('Diferença para o plano original',money(scenario_gross-gross_target))])
-        else:st.error('CPV impede margem de contribuição positiva.')
+    st.subheader('DRE anual — original, realizado e tendência')
+    dre_keys=[('Receita Bruta','receita_bruta'),('(-) Simples Nacional','simples'),('(-) Reserva técnica','reserva_tecnica'),('Receita Líquida','receita_liquida'),('(-) CPV de materiais','cpv'),('Margem de contribuição','lucro_bruto'),('(-) Despesas operacionais','despesas'),('(-) Salários e encargos','salarios_encargos'),('(-) Pró-labore','pro_labore'),('(-) Depreciação','depreciacao'),('Resultado financeiro','resultado_financeiro'),('Baixa de clientes','baixa_clientes'),('Lucro líquido','lucro_liquido')]
+    dre_rows=[]
+    for name,k in dre_keys:
+        original=sum(v[k] for v in prev)
+        actual=float(val(fechados,k).sum())
+        trend=actual+sum(future[i][k] for i in range(12) if bool(aberto.iloc[i]))
+        dre_rows.append({'Conta':name,'Original':money(original),'Realizado fechado':money(actual),'Tendência':money(trend)})
+    st.dataframe(pd.DataFrame(dre_rows),hide_index=True,width='stretch',height=490)
     st.subheader('Próximos 12 meses')
     available=plan[plan.mes.notna()].sort_values('mes').copy()
-    # Também na janela móvel, distribuir os pesos trimestrais igualmente.
-    available['peso_igual']=0.
-    for ano_group,group in available.groupby('ano'):
-        if len(group)!=12:continue
-        weights=pd.to_numeric(group.peso_sazonal,errors='coerce').fillna(0).to_numpy()
-        if weights.sum()<=0:continue
-        weights=weights/weights.sum()
-        w=[sum(weights[q:q+3])/3 for q in (0,3,6,9) for _ in range(3)]
-        available.loc[group.index,'peso_igual']=w
-    available['meta_corrigida']=available.meta_receita_bruta_anual*available.peso_igual
+    available['meta_corrigida']=0.
+    for yy,grp in available.groupby('ano'):
+        if len(grp)!=12:continue
+        ww=grp.peso_sazonal.fillna(0).to_numpy()
+        if ww.sum()<=0:continue
+        ww=ww/ww.sum()
+        available.loc[grp.index,'meta_corrigida']=grp.meta_receita_bruta_anual.to_numpy()*[sum(ww[q:q+3])/3 for q in (0,3,6,9) for _ in range(3)]
     last_close=R.mes.max()
     next_month=(last_close.to_period('M')+1).to_timestamp()
     rolling=available[(available.mes>=next_month)&(available.mes<next_month+pd.DateOffset(months=12))].copy()
@@ -562,7 +586,6 @@ elif nav=='Margem e Planejamento':
         rolling['Plano do exercício']=rolling.meta_corrigida.map(money)
         show(rolling,['Mês','ano','Plano do exercício'],{'ano':'Exercício'},height=460)
         st.metric('Total bruto dos próximos 12 meses',money(rolling.meta_corrigida.sum()))
-        st.caption('Cada mês pertence ao plano anual do respectivo exercício; a meta de 2027 não é antecipada para 2026.')
     else:st.info('Janela móvel fora dos anos disponíveis no planejamento.')
 
 elif nav=='Romaneios':
