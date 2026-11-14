@@ -195,7 +195,7 @@ def chart(fig):
 
 with st.sidebar:
     st.image(str(ROOT/'logo_granart.png'),width='stretch')
-    st.caption('PORTAL EXECUTIVO · V3.6')
+    st.caption('PORTAL EXECUTIVO · V3.6.2')
     if '_pending_nav' in st.session_state:st.session_state['nav']=st.session_state.pop('_pending_nav')
     nav=st.radio('Menu',['Visão Geral','DRE — Resultados','Financeiro','Comercial','Romaneios','Produção','Materiais e Estoque','Margem e Planejamento'],label_visibility='collapsed',key='nav')
     st.divider()
@@ -545,16 +545,44 @@ elif nav=='Margem e Planejamento':
     elif total_necessario<0 and n_open:st.info('O lucro acumulado já permite atingir a meta sem Receita Bruta adicional, consideradas as despesas futuras.')
     st.subheader('Acompanhamento mensal')
     annual['exibido']=annual.realizado.where(fechado,annual.parcial)
-    table=pd.DataFrame({'Mês':annual.mes.dt.strftime('%m/%Y'),'Meta original':annual.meta_mensal,'Receita Bruta Realizada':annual.exibido,'% da meta':annual.pct_meta,'Meta Recalculada':annual.meta_recalculada,'Lucro original':annual.lucro_meta,'Lucro realizado':annual.lucro_realizado,'Diferença de lucro':annual.lucro_realizado-annual.lucro_meta})
-    table.loc[annual.parcial.notna() & ~fechado,'Mês']=table.loc[annual.parcial.notna() & ~fechado,'Mês']+' (parcial)'
+    table=pd.DataFrame({
+        'Mês':annual.mes.dt.strftime('%m/%Y'),
+        'Receita Bruta Meta':annual.meta_mensal,
+        'Receita Bruta Realizada':annual.exibido,
+        '% Receita Meta':annual.pct_meta,
+        'Receita Bruta Meta Recalculada':annual.meta_recalculada,
+        'Lucro Meta':annual.lucro_meta,
+        'Lucro Realizado':annual.lucro_realizado,
+        '% Lucro Meta':annual.lucro_realizado.div(annual.lucro_meta.where(annual.lucro_meta.ne(0))).mul(100),
+        'Diferença de Lucro':annual.lucro_realizado-annual.lucro_meta,
+    })
+    # Identificação curta: evita truncar a competência na primeira coluna.
+    table.loc[annual.parcial.notna() & ~fechado,'Mês']=table.loc[annual.parcial.notna() & ~fechado,'Mês']+' (atual)'
     total_exibido=float(annual.exibido.sum(skipna=True))
-    row={'Mês':'TOTAL','Meta original':gross_target,'Receita Bruta Realizada':total_exibido,'% da meta':100*total_exibido/gross_target if gross_target else float('nan'),'Meta Recalculada':float(annual.meta_recalculada.sum(skipna=True)) if n_open else float('nan'),'Lucro original':float(annual.lucro_meta.sum()),'Lucro realizado':lucro_acumulado,'Diferença de lucro':lucro_acumulado-float(annual.loc[fechado,'lucro_meta'].sum())}
+    row={
+        'Mês':'TOTAL',
+        'Receita Bruta Meta':gross_target,
+        'Receita Bruta Realizada':total_exibido,
+        '% Receita Meta':100*total_exibido/gross_target if gross_target else float('nan'),
+        'Receita Bruta Meta Recalculada':float(annual.meta_recalculada.sum(skipna=True)) if n_open else float('nan'),
+        'Lucro Meta':float(annual.lucro_meta.sum()),
+        'Lucro Realizado':lucro_acumulado,
+        '% Lucro Meta':100*lucro_acumulado/goal if goal else float('nan'),
+        # TOTAL compara o lucro realizado à meta ANUAL completa, não só aos meses fechados.
+        'Diferença de Lucro':lucro_acumulado-goal,
+    }
     table=pd.concat([table,pd.DataFrame([row])],ignore_index=True)
-    for k in ['Meta original','Receita Bruta Realizada','Meta Recalculada','Lucro original','Lucro realizado','Diferença de lucro']:
+    for k in ['Receita Bruta Meta','Receita Bruta Realizada','Receita Bruta Meta Recalculada','Lucro Meta','Lucro Realizado','Diferença de Lucro']:
         table[k]=table[k].map(lambda v:money(v) if pd.notna(v) else '—')
-    table['% da meta']=table['% da meta'].map(lambda v:pct(v) if pd.notna(v) else '—')
-    st.dataframe(table,hide_index=True,width='stretch',height=490)
-    if parcial_mes is not None:st.caption('TOTAL de Receita Bruta inclui o mês parcial identificado; lucro realizado considera apenas meses fechados.')
+    for k in ['% Receita Meta','% Lucro Meta']:
+        table[k]=table[k].map(lambda v:pct(v) if pd.notna(v) else '—')
+    # Negrito e fundo suave para distinguir o consolidado das competências.
+    def destacar_total(linha):
+        destaque='font-weight: 700; background-color: #eae5db; border-top: 2px solid #a38c69;'
+        return [destaque if linha['Mês']=='TOTAL' else '' for _ in linha]
+    st.dataframe(table.style.apply(destacar_total,axis=1),hide_index=True,width='stretch',height=490)
+    st.caption('Na linha TOTAL, a diferença de lucro compara o realizado fechado à meta anual de R$ 1 milhão; nas linhas mensais, compara realizado e meta do mês. O percentual de lucro usa apenas meses fechados.')
+    if parcial_mes is not None:st.caption('Receita Bruta realizada no TOTAL inclui o mês atual em andamento; Lucro Realizado considera somente meses fechados.')
     fig=go.Figure()
     fig.add_scatter(x=annual.mes.dt.strftime('%m/%Y'),y=annual.meta_mensal,mode='lines+markers',name='Meta original',line=dict(color='#ad946a'))
     fig.add_scatter(x=annual.mes.dt.strftime('%m/%Y'),y=annual.realizado,mode='lines+markers',name='Realizado fechado',line=dict(color='#305d6b'))
