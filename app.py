@@ -19,6 +19,9 @@ st.markdown('''<style>
 [data-testid="stMetricValue"]{font-size:clamp(1.03rem,1.7vw,1.65rem)!important;white-space:normal!important;overflow:visible!important;text-overflow:clip!important}
 .period{background:white;border-left:4px solid #aa987a;padding:12px 16px;border-radius:8px;margin:8px 0 16px}
 .stButton button{border-radius:9px!important}
+/* Cabeçalhos das tabelas nativas: mesma paleta Gran’Art, maior contraste */
+[data-testid="stDataFrame"] [role="columnheader"]{background:#eee9e0!important;color:#37332e!important;font-weight:650!important;border-bottom:2px solid #aa987a!important}
+[data-testid="stDataFrame"]{border:1px solid #e0dbd2;border-radius:9px;overflow:hidden}
 </style>''',unsafe_allow_html=True)
 
 import hashlib as _hashlib
@@ -93,18 +96,35 @@ def compact(x):
     except:return '—'
 def pct(x):return num(x,1)+'%'
 def val(df,k):return pd.to_numeric(df[k],errors='coerce').fillna(0) if k in df else pd.Series(0.0,index=df.index)
-def moeda_editavel(rotulo, valor, chave):
-    # Texto em pt-BR com separador de milhares. Atualiza no Enter ou ao sair do campo.
-    original=num(valor,2)
-    texto=st.text_input(rotulo,value=original,key=chave)
-    limpo=str(texto).strip().replace('R$','').replace(' ','')
+def _converter_moeda_ptbr(texto):
+    """Aceita 360000, 360.000,00, 360000,00 e valores negativos."""
+    t=str(texto).replace('R$','').replace('\u00a0','').replace(' ','').strip()
+    if not t:raise ValueError('Campo vazio')
+    if ',' in t:
+        t=t.replace('.','').replace(',','.')
+    elif t.count('.')>1:
+        t=t.replace('.','')
+    elif t.count('.')==1 and len(t.split('.')[1])==3:
+        t=t.replace('.','')
+    v=float(t)
+    if not __import__('math').isfinite(v):raise ValueError('Número inválido')
+    return v
+
+def _formatar_moeda_ao_sair(chave):
+    """O on_change é disparado ao pressionar Enter ou ao perder o foco."""
     try:
-        if ',' in limpo:numero=float(limpo.replace('.','').replace(',','.'))
-        else:numero=float(limpo.replace('.','')) if limpo.count('.')>1 else float(limpo)
-        if not __import__('math').isfinite(numero):raise ValueError()
-        return numero
+        st.session_state[chave]=num(_converter_moeda_ptbr(st.session_state[chave]),2)
+        st.session_state.pop(chave+'_erro',None)
     except (ValueError,TypeError):
-        st.warning(f'Valor inválido em {rotulo}. Use, por exemplo, 100.000,00.')
+        st.session_state[chave+'_erro']=True
+
+def moeda_editavel(rotulo, valor, chave):
+    if chave not in st.session_state:
+        st.session_state[chave]=num(valor,2)
+    texto=st.text_input(rotulo,key=chave,on_change=_formatar_moeda_ao_sair,args=(chave,))
+    try:return _converter_moeda_ptbr(texto)
+    except (ValueError,TypeError):
+        st.warning(f'Valor inválido em {rotulo}. Exemplo: 360.000,00.')
         return float(valor)
 
 def cards(data):
@@ -196,7 +216,7 @@ def chart(fig):
 
 with st.sidebar:
     st.image(str(ROOT/'logo_granart.png'),width='stretch')
-    st.caption('PORTAL EXECUTIVO · V3.6.3')
+    st.caption('PORTAL EXECUTIVO · V3.6.5')
     if '_pending_nav' in st.session_state:st.session_state['nav']=st.session_state.pop('_pending_nav')
     nav=st.radio('Menu',['Visão Geral','DRE — Resultados','Financeiro','Comercial','Romaneios','Produção','Materiais e Estoque','Margem e Planejamento'],label_visibility='collapsed',key='nav')
     st.divider()
@@ -279,11 +299,24 @@ elif nav=='DRE — Resultados':
 
 elif nav=='Financeiro':
     st.title('Financeiro');c=sheet('BI_Caixa');summary=c[c.tipo.astype(str).str.casefold()=='resumo']
+    def valor_caixa(valor, indicador):
+        """Converte números e textos monetários pt-BR sem alterar os saldos de origem."""
+        if pd.isna(valor) or str(valor).strip()=='':
+            st.error(f'BI_Caixa: valor ausente para {indicador}. Confira a publicação da automação.')
+            st.stop()
+        try:
+            return _converter_moeda_ptbr(valor)
+        except (ValueError, TypeError, OverflowError):
+            st.error(f'BI_Caixa: valor inválido para {indicador}. Confira o dado publicado no Google Sheets.')
+            st.stop()
     def lookup(s):
-        a=summary[summary.indicador.astype(str).str.casefold()==s.casefold()]
-        return float(a.valor.iloc[0]) if len(a) else 0.0
+        a=summary[summary.indicador.astype(str).str.strip().str.casefold()==s.casefold()]
+        return valor_caixa(a.valor.iloc[0],s) if len(a) else 0.0
     st.subheader('Posição financeira')
-    available=lookup('Disponível');cheques=float(c.loc[c.indicador.astype(str).str.casefold()=='cheques e cartão','valor'].sum());total_cash=lookup('Saldo financeiro total')
+    available=lookup('Disponível')
+    valores_cheques=c.loc[c.indicador.astype(str).str.strip().str.casefold()=='cheques e cartão','valor']
+    cheques=sum(valor_caixa(v,'Cheques e cartão') for v in valores_cheques)
+    total_cash=lookup('Saldo financeiro total')
     cards([('Saldo disponível',compact(available)),('Cheques e cartão a receber',compact(cheques)),('Instalados a receber',compact(lookup('Instalados a receber')))])
     st.subheader('Capital de giro')
     cards([(k,compact(lookup(k))) for k in ['Sem investimentos e sem adiantamentos','Sem investimentos','Com investimentos']])
@@ -300,7 +333,7 @@ elif nav=='Comercial':
         tickets=tickets.dropna(subset=['ano']).sort_values('ano')
         if len(tickets):
             anos_tickets=sorted(tickets.ano.astype(int).unique().tolist(),reverse=True)
-            ano_ticket=st.selectbox('Ano dos tickets médios',anos_tickets,key='ano_ticket')
+            ano_ticket=st.selectbox('Ano',anos_tickets,key='ano_ticket')
             selecionado=tickets[tickets.ano.eq(ano_ticket)].iloc[0]
             cards([('Ticket orçado · '+str(ano_ticket),money(selecionado['ticket_orcado'])),('Ticket vendido · '+str(ano_ticket),money(selecionado['ticket_vendido'])),('Ticket instalado · '+str(ano_ticket),money(selecionado['ticket_instalado']))])
             if ano_ticket==max(anos_tickets):st.caption('O ano mais recente pode estar parcial.')
@@ -309,13 +342,24 @@ elif nav=='Comercial':
                 fig.add_scatter(x=tickets.ano.astype(int).astype(str),y=pd.to_numeric(tickets[key],errors='coerce'),mode='lines+markers',name=label,line=dict(color=color,width=2.5))
             chart(fig)
             st.caption('Evolução histórica completa. Tickets calculados a partir das abas Orçam. e Receitas; ano corrente parcial.')
-            with st.expander('Valores e quantidades por ano'):
+            with st.expander('Quantidades e valores por ano'):
                 colunas=['ano','quantidade_orcado','valor_orcado','ticket_orcado','quantidade_vendido','valor_vendido','ticket_vendido','quantidade_instalado','valor_instalado','ticket_instalado']
                 view=tickets[colunas].copy()
                 for k in colunas:
                     if k.startswith('valor_') or k.startswith('ticket_'):view[k]=view[k].map(money)
                     elif k.startswith('quantidade_'):view[k]=pd.to_numeric(view[k],errors='coerce').map(lambda x:num(x,0))
-                show(view,colunas,{'ano':'Ano','quantidade_orcado':'Qtd. orçada','valor_orcado':'Valor orçado','ticket_orcado':'Ticket orçado','quantidade_vendido':'Qtd. vendida','valor_vendido':'Valor vendido','ticket_vendido':'Ticket vendido','quantidade_instalado':'Qtd. instalada','valor_instalado':'Valor instalado','ticket_instalado':'Ticket instalado'},height=270)
+                # Grupos orçado / vendido / instalado com divisórias discretas.
+                titulos=['Ano','Quantidade','Valor','Ticket médio','Quantidade','Valor','Ticket médio','Quantidade','Valor','Ticket médio']
+                cab1='<th rowspan="2">Ano</th><th colspan="3">ORÇADO</th><th colspan="3">VENDIDO</th><th colspan="3">INSTALADO</th>'
+                cab2=''.join('<th>'+t+'</th>' for t in titulos[1:])
+                linhas=[]
+                for _,reg in view.iterrows():
+                    cells=[]
+                    for j,col in enumerate(colunas):
+                        valor=html_escape(str(reg[col]))
+                        cells.append('<td'+(' class="grupo"' if j in (1,4,7) else '')+'>'+valor+'</td>')
+                    linhas.append('<tr>'+''.join(cells)+'</tr>')
+                st.markdown('''<style>.ga-tickets{width:100%;border-collapse:collapse;font-size:13px;background:#fff}.ga-tickets th{background:#eee9e0;color:#37332e;font-weight:650;border-bottom:2px solid #aa987a;padding:9px 7px}.ga-tickets td{border-bottom:1px solid #e8e5df;padding:9px 7px}.ga-tickets th:nth-child(3),.ga-tickets th:nth-child(4){border-left:2px solid #c5b7a1}.ga-tickets .grupo{border-left:2px solid #c5b7a1}.ga-tickets tr:hover td{background:#faf8f3}.ga-tickets-wrap{overflow-x:auto;border:1px solid #e0dbd2;border-radius:9px}</style><div class="ga-tickets-wrap"><table class="ga-tickets"><thead><tr>'''+cab1+'''</tr><tr>'''+cab2+'''</tr></thead><tbody>'''+''.join(linhas)+'''</tbody></table></div>''',unsafe_allow_html=True)
     st.divider()
     df=sheet('BI_Orcamentos_Comercial').copy()
     st.subheader('Desempenho comercial')
@@ -353,6 +397,7 @@ elif nav=='Comercial':
         fig=go.Figure(go.Bar(x=amounts.index.tolist(),y=amounts.values.tolist(),text=[compact(v) for v in amounts.values],textposition='outside',marker_color=['#42776c','#9e8773','#b6a27b']))
         fig.update_layout(yaxis_title='Valor orçado oficial (R$)');chart(fig)
     st.divider()
+    st.subheader('Consulta de orçamentos')
     a,b=st.columns([2,1])
     with a:q=st.text_input('Buscar por código ou cliente')
     with b:status=st.selectbox('Situação',['Todos','Em análise','Vendido','Recusado'])
@@ -370,7 +415,6 @@ elif nav=='Comercial':
     if status!='Todos':df=df[df['Situação']==status]
     df['_sort']=pd.to_numeric(df.orcamento,errors='coerce');df=df.sort_values('_sort',ascending=False,na_position='last')
     cards([('Orçamentos encontrados',num(len(df),0))])
-    st.subheader('Consulta de orçamentos')
     df['valor_orcado_oficial']=df.valor_orcado_oficial.map(money)
     # Links comerciais publicados pelo indexador do Drive, incluindo todos os status.
     if 'link_pdf' in df.columns:
@@ -380,7 +424,7 @@ elif nav=='Comercial':
     show(df,['orcamento','Cliente','Situação','valor_orcado_oficial','PDF'],{'orcamento':'Código do orçamento','valor_orcado_oficial':'Valor orçado'},height=470,links=['PDF'],extra_config={'Código do orçamento':st.column_config.NumberColumn('Código do orçamento',width='small',format='%d'),'Cliente':st.column_config.TextColumn('Cliente',width='medium'),'Valor orçado':st.column_config.TextColumn('Valor orçado',width='medium')})
     sem_pdf=int(df['PDF'].eq('').sum())
     if sem_pdf:st.caption(f'{sem_pdf} orçamento(s) da consulta ainda sem PDF correspondente na pasta do Drive.')
-    st.subheader('Materiais dos orçamentos')
+    st.subheader('Detalhamento dos itens do orçamento')
     code=st.text_input('Código do orçamento para consultar os itens')
     if code:
         items=sheet('BI_Orcamentos_Itens')
@@ -607,7 +651,7 @@ elif nav=='Margem e Planejamento':
     tabela_html='''<style>
     .ga-tabela-wrap{overflow-x:auto;padding-left:42px;margin-left:-3px;width:100%;}
     .ga-tabela{width:100%;border-collapse:separate;border-spacing:0;font-size:12px;color:#302e2d;background:white;min-width:1060px;}
-    .ga-tabela th{background:#f8f7f4;color:#68635d;font-weight:600;text-align:left;white-space:nowrap;line-height:1.35;position:sticky;top:0;z-index:1;}
+    .ga-tabela th{background:#eee9e0;color:#37332e;font-weight:700;border-bottom:2px solid #aa987a;text-align:left;white-space:nowrap;line-height:1.35;position:sticky;top:0;z-index:1;}
     .ga-tabela th,.ga-tabela td{padding:9px 8px;border-right:1px solid #e8e5df;border-bottom:1px solid #e8e5df;white-space:nowrap;}
     .ga-tabela th:first-child,.ga-tabela td:first-child{min-width:84px;position:relative;}
     .ga-tabela tr.ga-atual td{border-top:1px dashed #9b7c47;border-bottom:1px dashed #9b7c47;background:#fcf9f1;}
@@ -617,7 +661,6 @@ elif nav=='Margem e Planejamento':
     .ga-tabela tr.ga-total td{font-weight:750;background:#eae5db;border-top:2px solid #a38c69;}
     </style><div class="ga-tabela-wrap"><table class="ga-tabela"><thead><tr>'''+cabecalho+'''</tr></thead><tbody>'''+''.join(linhas_html)+'''</tbody></table></div>'''
     st.markdown(tabela_html,unsafe_allow_html=True)
-    st.caption('No TOTAL, a diferença de lucro compara o realizado fechado à meta anual; nos meses, compara o realizado à meta mensal. O lucro realizado considera apenas meses fechados.')
     fig=go.Figure()
     fig.add_scatter(x=annual.mes.dt.strftime('%m/%Y'),y=annual.meta_mensal,mode='lines+markers',name='Meta original',line=dict(color='#ad946a'))
     fig.add_scatter(x=annual.mes.dt.strftime('%m/%Y'),y=annual.realizado,mode='lines+markers',name='Realizado fechado',line=dict(color='#305d6b'))
@@ -666,7 +709,7 @@ elif nav=='Margem e Planejamento':
         def destacar_total_12(linha):
             estilo='font-weight: 700; background-color: #eae5db; border-top: 2px solid #a38c69;'
             return [estilo if linha['Mês']=='TOTAL — 12 meses' else '' for _ in linha]
-        st.dataframe(vista.style.apply(destacar_total_12,axis=1),hide_index=True,width='stretch',height=460)
+        st.dataframe(vista.style.apply(destacar_total_12,axis=1),hide_index=True,width='stretch',height=max(490, 40+len(vista)*36))
     else:st.info('Janela móvel fora dos anos disponíveis no planejamento.')
 
 elif nav=='Romaneios':
@@ -860,8 +903,13 @@ elif nav=='Produção':
             if n<=15:return 'background-color:#eff1c7;color:#4e5e20'
             return 'background-color:#dff0dc;color:#235d3d'
         except:return ''
+    def codigo_sem_decimais(x):
+        try:return str(int(float(x))) if pd.notna(x) else '—'
+        except (ValueError,TypeError):return str(x)
+    table['Orçamento']=table['Orçamento'].map(codigo_sem_decimais)
+    table['Dias de prazo']=pd.to_numeric(table['Dias de prazo'],errors='coerce').astype('Int64')
     styled=table.style.map(prazo_color,subset=['Dias de prazo'])
-    st.dataframe(styled,hide_index=True,width='stretch',height=540,column_config={'PDF':st.column_config.LinkColumn('PDF',display_text='Abrir')})
+    st.dataframe(styled,hide_index=True,width='stretch',height=540,column_config={'Orçamento':st.column_config.TextColumn('Orçamento',width='small'),'Cliente':st.column_config.TextColumn('Cliente',width='large'),'Situação':st.column_config.TextColumn('Situação',width='medium'),'Dias de prazo':st.column_config.NumberColumn('Dias de prazo',width='small',format='%d'),'Metragem prevista (m²)':st.column_config.TextColumn('Metragem prevista (m²)',width='medium'),'Valor da venda':st.column_config.TextColumn('Valor da venda',width='medium'),'PDF':st.column_config.LinkColumn('PDF',display_text='Abrir',width='small')})
 
 elif nav=='Materiais e Estoque':
     st.title('Materiais e Estoque')
