@@ -5,6 +5,7 @@ from pathlib import Path
 from datetime import datetime
 import re
 from io import BytesIO
+from html import escape as html_escape
 from xml.sax.saxutils import escape as xml_escape
 
 ROOT=Path(__file__).resolve().parent
@@ -195,7 +196,7 @@ def chart(fig):
 
 with st.sidebar:
     st.image(str(ROOT/'logo_granart.png'),width='stretch')
-    st.caption('PORTAL EXECUTIVO · V3.6.2')
+    st.caption('PORTAL EXECUTIVO · V3.6.3')
     if '_pending_nav' in st.session_state:st.session_state['nav']=st.session_state.pop('_pending_nav')
     nav=st.radio('Menu',['Visão Geral','DRE — Resultados','Financeiro','Comercial','Romaneios','Produção','Materiais e Estoque','Margem e Planejamento'],label_visibility='collapsed',key='nav')
     st.divider()
@@ -463,7 +464,7 @@ elif nav=='Margem e Planejamento':
         plan[k]=pd.to_numeric(plan[k],errors='coerce')
     years_plan=sorted(plan.ano.dropna().astype(int).unique().tolist())
     if not years_plan:st.error('Planejamento sem exercícios válidos.');st.stop()
-    year=st.selectbox('Exercício do planejamento',years_plan)
+    year=st.selectbox('Ano do planejamento',years_plan)
     annual=plan[plan.ano.eq(year)].sort_values('mes').copy()
     if len(annual)!=12:st.error('Planejamento incompleto para este exercício.');st.stop()
     goal=float(annual.meta_lucro_anual.iloc[0]);gross_target=float(annual.meta_receita_bruta_anual.iloc[0])
@@ -511,7 +512,7 @@ elif nav=='Margem e Planejamento':
     except Exception:pass
     annual['parcial']=annual.mes.dt.to_period('M').map({parcial_mes:parcial_bruto} if parcial_mes is not None else {})
     annual['pct_meta']=annual.realizado.where(fechado,annual.parcial)/annual.meta_mensal*100
-    st.markdown('**Resumo do exercício**')
+    st.markdown('**Resumo do ano**')
     cards([('Meta de lucro anual',money(goal)),('Meta de Receita Bruta',money(gross_target)),('Receita Bruta Realizada',money(bruto_acumulado)),('Receita Bruta a Realizar',money(falta_bruto))])
     cards([('Lucro realizado',money(lucro_acumulado)),('Tendência de Receita Bruta',money(tendencia_bruta) if tendencia_bruta is not None else 'Sem meses fechados'),('Tendência de Lucro Líquido',money(annual.lucro_tendencia.sum())),('Ano-base',str(int(annual.sazonalidade_ano.iloc[0])))])
     state=str(pdict.get(f'plano_{year}_estado','')).strip()
@@ -551,13 +552,13 @@ elif nav=='Margem e Planejamento':
         'Receita Bruta Realizada':annual.exibido,
         '% Receita Meta':annual.pct_meta,
         'Receita Bruta Meta Recalculada':annual.meta_recalculada,
-        'Lucro Meta':annual.lucro_meta,
-        'Lucro Realizado':annual.lucro_realizado,
-        '% Lucro Meta':annual.lucro_realizado.div(annual.lucro_meta.where(annual.lucro_meta.ne(0))).mul(100),
+        'Lucro Líquido Meta':annual.lucro_meta,
+        'Lucro Líquido Realizado':annual.lucro_realizado,
+        '% Lucro Líquido Meta':annual.lucro_realizado.div(annual.lucro_meta.where(annual.lucro_meta.ne(0))).mul(100),
         'Diferença de Lucro':annual.lucro_realizado-annual.lucro_meta,
     })
-    # Identificação curta: evita truncar a competência na primeira coluna.
-    table.loc[annual.parcial.notna() & ~fechado,'Mês']=table.loc[annual.parcial.notna() & ~fechado,'Mês']+' (atual)'
+    # Mês vigente identificado visualmente sem alongar a competência.
+    mes_atual=set(annual.loc[annual.parcial.notna() & ~fechado,'mes'].dt.strftime('%m/%Y'))
     total_exibido=float(annual.exibido.sum(skipna=True))
     row={
         'Mês':'TOTAL',
@@ -565,55 +566,107 @@ elif nav=='Margem e Planejamento':
         'Receita Bruta Realizada':total_exibido,
         '% Receita Meta':100*total_exibido/gross_target if gross_target else float('nan'),
         'Receita Bruta Meta Recalculada':float(annual.meta_recalculada.sum(skipna=True)) if n_open else float('nan'),
-        'Lucro Meta':float(annual.lucro_meta.sum()),
-        'Lucro Realizado':lucro_acumulado,
-        '% Lucro Meta':100*lucro_acumulado/goal if goal else float('nan'),
+        'Lucro Líquido Meta':float(annual.lucro_meta.sum()),
+        'Lucro Líquido Realizado':lucro_acumulado,
+        '% Lucro Líquido Meta':100*lucro_acumulado/goal if goal else float('nan'),
         # TOTAL compara o lucro realizado à meta ANUAL completa, não só aos meses fechados.
         'Diferença de Lucro':lucro_acumulado-goal,
     }
     table=pd.concat([table,pd.DataFrame([row])],ignore_index=True)
-    for k in ['Receita Bruta Meta','Receita Bruta Realizada','Receita Bruta Meta Recalculada','Lucro Meta','Lucro Realizado','Diferença de Lucro']:
+    for k in ['Receita Bruta Meta','Receita Bruta Realizada','Receita Bruta Meta Recalculada','Lucro Líquido Meta','Lucro Líquido Realizado','Diferença de Lucro']:
         table[k]=table[k].map(lambda v:money(v) if pd.notna(v) else '—')
-    for k in ['% Receita Meta','% Lucro Meta']:
+    for k in ['% Receita Meta','% Lucro Líquido Meta']:
         table[k]=table[k].map(lambda v:pct(v) if pd.notna(v) else '—')
-    # Negrito e fundo suave para distinguir o consolidado das competências.
-    def destacar_total(linha):
-        destaque='font-weight: 700; background-color: #eae5db; border-top: 2px solid #a38c69;'
-        return [destaque if linha['Mês']=='TOTAL' else '' for _ in linha]
-    st.dataframe(table.style.apply(destacar_total,axis=1),hide_index=True,width='stretch',height=490)
-    st.caption('Na linha TOTAL, a diferença de lucro compara o realizado fechado à meta anual de R$ 1 milhão; nas linhas mensais, compara realizado e meta do mês. O percentual de lucro usa apenas meses fechados.')
-    if parcial_mes is not None:st.caption('Receita Bruta realizada no TOTAL inclui o mês atual em andamento; Lucro Realizado considera somente meses fechados.')
+    # Tabela HTML controlada: cabeçalhos em duas linhas, mês vigente com borda
+    # pontilhada em toda a linha e etiqueta externa à esquerda, sem legenda.
+    colunas_tabela=list(table.columns)
+    rotulos_cabecalho={
+        'Mês':'Mês','Receita Bruta Meta':'Receita Bruta<br>Meta',
+        'Receita Bruta Realizada':'Receita Bruta<br>Realizada',
+        '% Receita Meta':'% Receita<br>Meta',
+        'Receita Bruta Meta Recalculada':'Receita Bruta<br>Meta Recalculada',
+        'Lucro Líquido Meta':'Lucro Líquido<br>Meta',
+        'Lucro Líquido Realizado':'Lucro Líquido<br>Realizado',
+        '% Lucro Líquido Meta':'% Lucro<br>Meta',
+        'Diferença de Lucro':'Diferença<br>de Lucro',
+    }
+    linhas_html=[]
+    for _,linha in table.iterrows():
+        competencia=str(linha['Mês'])
+        atual=competencia in mes_atual
+        total=competencia=='TOTAL'
+        classe='ga-total' if total else ('ga-atual' if atual else '')
+        celulas=[]
+        for coluna in colunas_tabela:
+            valor=html_escape(str(linha[coluna]))
+            if coluna=='Mês' and atual:
+                valor='<span class="ga-atual-tag">Atual</span>'+valor
+            celulas.append('<td>'+valor+'</td>')
+        linhas_html.append('<tr class="'+classe+'">'+''.join(celulas)+'</tr>')
+    cabecalho=''.join('<th>'+rotulos_cabecalho.get(c,html_escape(c))+'</th>' for c in colunas_tabela)
+    tabela_html='''<style>
+    .ga-tabela-wrap{overflow-x:auto;padding-left:42px;margin-left:-3px;width:100%;}
+    .ga-tabela{width:100%;border-collapse:separate;border-spacing:0;font-size:12px;color:#302e2d;background:white;min-width:1060px;}
+    .ga-tabela th{background:#f8f7f4;color:#68635d;font-weight:600;text-align:left;white-space:nowrap;line-height:1.35;position:sticky;top:0;z-index:1;}
+    .ga-tabela th,.ga-tabela td{padding:9px 8px;border-right:1px solid #e8e5df;border-bottom:1px solid #e8e5df;white-space:nowrap;}
+    .ga-tabela th:first-child,.ga-tabela td:first-child{min-width:84px;position:relative;}
+    .ga-tabela tr.ga-atual td{border-top:1px dashed #9b7c47;border-bottom:1px dashed #9b7c47;background:#fcf9f1;}
+    .ga-tabela tr.ga-atual td:first-child{border-left:1px dashed #9b7c47;}
+    .ga-tabela tr.ga-atual td:last-child{border-right:1px dashed #9b7c47;}
+    .ga-atual-tag{position:absolute;right:calc(100% + 7px);top:50%;transform:translateY(-50%);font-size:10px;font-weight:700;color:#876c3d;}
+    .ga-tabela tr.ga-total td{font-weight:750;background:#eae5db;border-top:2px solid #a38c69;}
+    </style><div class="ga-tabela-wrap"><table class="ga-tabela"><thead><tr>'''+cabecalho+'''</tr></thead><tbody>'''+''.join(linhas_html)+'''</tbody></table></div>'''
+    st.markdown(tabela_html,unsafe_allow_html=True)
+    st.caption('No TOTAL, a diferença de lucro compara o realizado fechado à meta anual; nos meses, compara o realizado à meta mensal. O lucro realizado considera apenas meses fechados.')
     fig=go.Figure()
     fig.add_scatter(x=annual.mes.dt.strftime('%m/%Y'),y=annual.meta_mensal,mode='lines+markers',name='Meta original',line=dict(color='#ad946a'))
     fig.add_scatter(x=annual.mes.dt.strftime('%m/%Y'),y=annual.realizado,mode='lines+markers',name='Realizado fechado',line=dict(color='#305d6b'))
     fig.add_scatter(x=annual.mes.dt.strftime('%m/%Y'),y=annual.meta_recalculada,mode='lines+markers',name='Meta Recalculada',line=dict(color='#42776c',dash='dash'))
     chart(fig)
-    st.subheader('DRE anual — original, realizado e tendência')
+    st.subheader(f'DRE anual — {year}')
     dre_keys=[('Receita Bruta','receita_bruta'),('(-) Simples Nacional','simples'),('(-) Reserva técnica','reserva_tecnica'),('Receita Líquida','receita_liquida'),('(-) CPV de materiais','cpv'),('Margem de contribuição','lucro_bruto'),('(-) Despesas operacionais','despesas'),('(-) Salários e encargos','salarios_encargos'),('(-) Pró-labore','pro_labore'),('(-) Depreciação','depreciacao'),('Resultado financeiro','resultado_financeiro'),('Baixa de clientes','baixa_clientes'),('Lucro líquido','lucro_liquido')]
+    periodo_realizado=(f'jan–{MONTHS[int(fechados.mes.dt.month.max())-1].lower()}/{year}' if len(fechados) else f'sem fechamento/{year}')
     dre_rows=[]
     for name,k in dre_keys:
         original=sum(v[k] for v in prev)
         actual=float(val(fechados,k).sum())
         trend=actual+sum(future[i][k] for i in range(12) if bool(aberto.iloc[i]))
-        dre_rows.append({'Conta':name,'Original':money(original),'Realizado fechado':money(actual),'Tendência':money(trend)})
+        dre_rows.append({'Conta':name,f'Planejado {year}':money(original),f'Realizado {periodo_realizado}':money(actual),f'Tendência {year}':money(trend)})
     st.dataframe(pd.DataFrame(dre_rows),hide_index=True,width='stretch',height=490)
     st.subheader('Próximos 12 meses')
     available=plan[plan.mes.notna()].sort_values('mes').copy()
     available['meta_corrigida']=0.
+    available['lucro_meta_mes']=float('nan')
     for yy,grp in available.groupby('ano'):
         if len(grp)!=12:continue
         ww=grp.peso_sazonal.fillna(0).to_numpy()
         if ww.sum()<=0:continue
         ww=ww/ww.sum()
-        available.loc[grp.index,'meta_corrigida']=grp.meta_receita_bruta_anual.to_numpy()*[sum(ww[q:q+3])/3 for q in (0,3,6,9) for _ in range(3)]
+        pesos=[sum(ww[q:q+3])/3 for q in (0,3,6,9) for _ in range(3)]
+        bruto_ano=float(grp.meta_receita_bruta_anual.iloc[0])
+        available.loc[grp.index,'meta_corrigida']=bruto_ano*pd.Series(pesos,index=grp.index)
+        # O lucro mensal é derivado das premissas congeladas do próprio ano.
+        taxas_ano=[plan_prm(int(yy),k) for k in ('simples_sobre_liquida','rt_sobre_liquida','cpv_sobre_liquida')]
+        custos_ano=[plan_prm(int(yy),k) for k in ('salarios_encargos','pro_labore','despesas','depreciacao','resultado_financeiro','baixa_clientes')]
+        available.loc[grp.index,'lucro_meta_mes']=[calculo(bruto_ano*p,*taxas_ano,*custos_ano)['lucro_liquido'] for p in pesos]
     last_close=R.mes.max()
     next_month=(last_close.to_period('M')+1).to_timestamp()
     rolling=available[(available.mes>=next_month)&(available.mes<next_month+pd.DateOffset(months=12))].copy()
     if len(rolling):
         rolling['Mês']=rolling.mes.dt.strftime('%m/%Y')
-        rolling['Plano do exercício']=rolling.meta_corrigida.map(money)
-        show(rolling,['Mês','ano','Plano do exercício'],{'ano':'Exercício'},height=460)
-        st.metric('Total bruto dos próximos 12 meses',money(rolling.meta_corrigida.sum()))
+        rolling['Ano']=rolling.ano.astype(int).astype(str)
+        rolling['Receita Bruta Meta']=rolling.meta_corrigida.map(money)
+        rolling['Lucro Líquido Meta']=rolling.lucro_meta_mes.map(money)
+        vista=rolling[['Mês','Ano','Receita Bruta Meta','Lucro Líquido Meta']].copy()
+        vista=pd.concat([vista,pd.DataFrame([{
+            'Mês':'TOTAL — 12 meses','Ano':'',
+            'Receita Bruta Meta':money(rolling.meta_corrigida.sum()),
+            'Lucro Líquido Meta':money(rolling.lucro_meta_mes.sum())
+        }])],ignore_index=True)
+        def destacar_total_12(linha):
+            estilo='font-weight: 700; background-color: #eae5db; border-top: 2px solid #a38c69;'
+            return [estilo if linha['Mês']=='TOTAL — 12 meses' else '' for _ in linha]
+        st.dataframe(vista.style.apply(destacar_total_12,axis=1),hide_index=True,width='stretch',height=460)
     else:st.info('Janela móvel fora dos anos disponíveis no planejamento.')
 
 elif nav=='Romaneios':
