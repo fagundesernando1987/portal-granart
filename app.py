@@ -9,7 +9,7 @@ from html import escape as html_escape
 from xml.sax.saxutils import escape as xml_escape
 
 ROOT=Path(__file__).resolve().parent
-st.set_page_config(page_title='Gran’Art | Portal Executivo',page_icon='🏛️',layout='wide')
+st.set_page_config(page_title='Gran’Art | Portal Executivo',page_icon='🏛️',layout='wide',initial_sidebar_state='collapsed')
 st.markdown('''<style>
 .stApp{background:#f8f7f4;color:#302e2d}[data-testid="stSidebar"]{background:#f0ede7;border-right:1px solid #e2ddd3}
 .block-container{padding-top:1.1rem;max-width:1650px}h1,h2,h3{color:#302e2d;letter-spacing:-.02em}
@@ -19,6 +19,28 @@ st.markdown('''<style>
 [data-testid="stMetricValue"]{font-size:clamp(1.03rem,1.7vw,1.65rem)!important;white-space:normal!important;overflow:visible!important;text-overflow:clip!important}
 .period{background:white;border-left:4px solid #aa987a;padding:12px 16px;border-radius:8px;margin:8px 0 16px}
 .stButton button{border-radius:9px!important}
+/* Cores explícitas para iOS / Safari com preferência por modo escuro. */
+:root{color-scheme:light!important}
+html,body,[data-testid="stAppViewContainer"],.stApp,[data-testid="stMain"]{background-color:#f8f7f4!important;color:#302e2d!important;color-scheme:light!important}
+[data-testid="stSidebar"], [data-testid="stSidebarContent"]{background-color:#f0ede7!important;color:#302e2d!important}
+.stApp p,.stApp label,.stApp span,.stApp h1,.stApp h2,.stApp h3,
+[data-testid="stSidebar"] p,[data-testid="stSidebar"] label{color:#302e2d}
+[data-testid="stMetric"]{background:#fff!important}
+[data-testid="stMetric"] label,[data-testid="stMetric"] p,[data-testid="stMetricValue"]{color:#302e2d!important}
+[data-testid="stTextInput"] input,[data-testid="stNumberInput"] input,
+[data-testid="stTextArea"] textarea,[data-testid="stSelectbox"] [data-baseweb="select"]>div{
+background-color:#fff!important;color:#302e2d!important;-webkit-text-fill-color:#302e2d!important;color-scheme:light!important}
+[data-testid="stTextInput"] input::placeholder{color:#80796e!important;-webkit-text-fill-color:#80796e!important}
+.stButton button,[data-testid="stFormSubmitButton"] button{background:#fff!important;color:#302e2d!important;border:1px solid #c9c0b2!important}
+.stButton button p,[data-testid="stFormSubmitButton"] button p{color:#302e2d!important}
+[data-testid="stRadio"] label,[data-testid="stRadio"] label p{color:#302e2d!important}
+[data-testid="stRadio"] [role="radio"]{border-color:#756e63!important}
+@media(max-width:767px){
+.block-container{padding-left:1rem!important;padding-right:1rem!important}
+.stApp h1{font-size:clamp(1.8rem,8vw,2.5rem)!important}
+.stApp h2{font-size:clamp(1.35rem,6vw,1.9rem)!important}
+[data-testid="stMetricValue"]{font-size:1.45rem!important}
+}
 /* Cabeçalhos das tabelas nativas: mesma paleta Gran’Art, maior contraste */
 [data-testid="stDataFrame"] [role="columnheader"]{background:#eee9e0!important;color:#37332e!important;font-weight:650!important;border-bottom:2px solid #aa987a!important}
 [data-testid="stDataFrame"]{border:1px solid #e0dbd2;border-radius:9px;overflow:hidden}
@@ -908,8 +930,39 @@ elif nav=='Produção':
         except (ValueError,TypeError):return str(x)
     table['Orçamento']=table['Orçamento'].map(codigo_sem_decimais)
     table['Dias de prazo']=pd.to_numeric(table['Dias de prazo'],errors='coerce').astype('Int64')
-    styled=table.style.map(prazo_color,subset=['Dias de prazo'])
-    st.dataframe(styled,hide_index=True,width='stretch',height=540,column_config={'Orçamento':st.column_config.TextColumn('Orçamento',width='small'),'Cliente':st.column_config.TextColumn('Cliente',width='large'),'Situação':st.column_config.TextColumn('Situação',width='medium'),'Dias de prazo':st.column_config.NumberColumn('Dias de prazo',width='small',format='%d'),'Metragem prevista (m²)':st.column_config.TextColumn('Metragem prevista (m²)',width='medium'),'Valor da venda':st.column_config.TextColumn('Valor da venda',width='medium'),'PDF':st.column_config.LinkColumn('PDF',display_text='Abrir',width='small')})
+    # HTML de largura fixa: sete colunas sempre visíveis no desktop, inclusive o PDF.
+    # No celular, a tabela pode rolar horizontalmente para não esmagar nomes e valores.
+    def _celula_prazo(v):
+        if pd.isna(v):return '—',''
+        return str(int(v)),prazo_color(v)
+    linhas=[]
+    for _,r in table.iterrows():
+        prazo_txt,prazo_estilo=_celula_prazo(r['Dias de prazo'])
+        pdf=str(r['PDF']).strip() if pd.notna(r['PDF']) else ''
+        pdf_html=('<a href="'+html_escape(pdf,quote=True)+'" target="_blank" rel="noopener noreferrer">Abrir</a>'
+                  if pdf.startswith(('https://','http://')) else '—')
+        valores=[html_escape(str(r['Orçamento'])),html_escape(str(r['Cliente'])) if pd.notna(r['Cliente']) else '—',
+                 html_escape(str(r['Situação'])) if pd.notna(r['Situação']) else '—',
+                 html_escape(prazo_txt),html_escape(str(r['Metragem prevista (m²)'])),
+                 html_escape(str(r['Valor da venda'])),pdf_html]
+        tds=''.join('<td'+(' style="'+prazo_estilo+'"' if i==3 and prazo_estilo else '')+'>'+v+'</td>' for i,v in enumerate(valores))
+        linhas.append('<tr>'+tds+'</tr>')
+    st.markdown('''<style>
+    .ga-pedidos-scroll{width:100%;overflow-x:auto;border:1px solid #e0dbd2;border-radius:9px;background:#fff}
+    .ga-pedidos{width:100%;table-layout:fixed;border-collapse:collapse;font-size:clamp(11px,.89vw,13px);color:#302e2d}
+    .ga-pedidos th{background:#eee9e0;color:#37332e;font-weight:700;border-bottom:2px solid #aa987a;padding:10px 7px;text-align:left;overflow-wrap:anywhere}
+    .ga-pedidos td{padding:10px 7px;border-bottom:1px solid #e8e5df;overflow-wrap:anywhere;vertical-align:middle}
+    .ga-pedidos th:nth-child(1){width:9%}.ga-pedidos th:nth-child(2){width:23%}
+    .ga-pedidos th:nth-child(3){width:20%}.ga-pedidos th:nth-child(4){width:10%}
+    .ga-pedidos th:nth-child(5){width:14%}.ga-pedidos th:nth-child(6){width:16%}
+    .ga-pedidos th:nth-child(7){width:8%}
+    .ga-pedidos a{color:#2863a3;text-decoration:underline;font-weight:600}
+    @media(max-width:767px){.ga-pedidos{min-width:850px;font-size:12px}}
+    </style><div class="ga-pedidos-scroll"><table class="ga-pedidos"><thead><tr>
+    <th>Orçamento</th><th>Cliente</th><th>Situação</th><th>Dias de prazo</th>
+    <th>Metragem prevista (m²)</th><th>Valor da venda</th><th>PDF</th>
+    </tr></thead><tbody>'''+''.join(linhas)+'''</tbody></table></div>''',unsafe_allow_html=True)
+
 
 elif nav=='Materiais e Estoque':
     st.title('Materiais e Estoque')
