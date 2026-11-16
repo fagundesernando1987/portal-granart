@@ -238,7 +238,7 @@ def chart(fig):
 
 with st.sidebar:
     st.image(str(ROOT/'logo_granart.png'),width='stretch')
-    st.caption('PORTAL EXECUTIVO · V3.6.5')
+    st.caption('PORTAL EXECUTIVO · V3.6.8')
     if '_pending_nav' in st.session_state:st.session_state['nav']=st.session_state.pop('_pending_nav')
     nav=st.radio('Menu',['Visão Geral','DRE — Resultados','Financeiro','Comercial','Romaneios','Produção','Materiais e Estoque','Margem e Planejamento'],label_visibility='collapsed',key='nav')
     st.divider()
@@ -930,38 +930,24 @@ elif nav=='Produção':
         except (ValueError,TypeError):return str(x)
     table['Orçamento']=table['Orçamento'].map(codigo_sem_decimais)
     table['Dias de prazo']=pd.to_numeric(table['Dias de prazo'],errors='coerce').astype('Int64')
-    # HTML de largura fixa: sete colunas sempre visíveis no desktop, inclusive o PDF.
-    # No celular, a tabela pode rolar horizontalmente para não esmagar nomes e valores.
-    def _celula_prazo(v):
-        if pd.isna(v):return '—',''
-        return str(int(v)),prazo_color(v)
-    linhas=[]
-    for _,r in table.iterrows():
-        prazo_txt,prazo_estilo=_celula_prazo(r['Dias de prazo'])
-        pdf=str(r['PDF']).strip() if pd.notna(r['PDF']) else ''
-        pdf_html=('<a href="'+html_escape(pdf,quote=True)+'" target="_blank" rel="noopener noreferrer">Abrir</a>'
-                  if pdf.startswith(('https://','http://')) else '—')
-        valores=[html_escape(str(r['Orçamento'])),html_escape(str(r['Cliente'])) if pd.notna(r['Cliente']) else '—',
-                 html_escape(str(r['Situação'])) if pd.notna(r['Situação']) else '—',
-                 html_escape(prazo_txt),html_escape(str(r['Metragem prevista (m²)'])),
-                 html_escape(str(r['Valor da venda'])),pdf_html]
-        tds=''.join('<td'+(' style="'+prazo_estilo+'"' if i==3 and prazo_estilo else '')+'>'+v+'</td>' for i,v in enumerate(valores))
-        linhas.append('<tr>'+tds+'</tr>')
-    st.markdown('''<style>
-    .ga-pedidos-scroll{width:100%;overflow-x:auto;border:1px solid #e0dbd2;border-radius:9px;background:#fff}
-    .ga-pedidos{width:100%;table-layout:fixed;border-collapse:collapse;font-size:clamp(11px,.89vw,13px);color:#302e2d}
-    .ga-pedidos th{background:#eee9e0;color:#37332e;font-weight:700;border-bottom:2px solid #aa987a;padding:10px 7px;text-align:left;overflow-wrap:anywhere}
-    .ga-pedidos td{padding:10px 7px;border-bottom:1px solid #e8e5df;overflow-wrap:anywhere;vertical-align:middle}
-    .ga-pedidos th:nth-child(1){width:9%}.ga-pedidos th:nth-child(2){width:23%}
-    .ga-pedidos th:nth-child(3){width:20%}.ga-pedidos th:nth-child(4){width:10%}
-    .ga-pedidos th:nth-child(5){width:14%}.ga-pedidos th:nth-child(6){width:16%}
-    .ga-pedidos th:nth-child(7){width:8%}
-    .ga-pedidos a{color:#2863a3;text-decoration:underline;font-weight:600}
-    @media(max-width:767px){.ga-pedidos{min-width:850px;font-size:12px}}
-    </style><div class="ga-pedidos-scroll"><table class="ga-pedidos"><thead><tr>
-    <th>Orçamento</th><th>Cliente</th><th>Situação</th><th>Dias de prazo</th>
-    <th>Metragem prevista (m²)</th><th>Valor da venda</th><th>PDF</th>
-    </tr></thead><tbody>'''+''.join(linhas)+'''</tbody></table></div>'''.replace('\n',''),unsafe_allow_html=True)
+    # Tabela nativa: evita que HTML seja interpretado como texto no Streamlit.
+    # As larguras são proporcionais ao conteúdo; PDF permanece como última coluna.
+    table['PDF']=table['PDF'].apply(lambda x: str(x).strip() if pd.notna(x) and str(x).strip().startswith(('https://','http://')) else None)
+    st.dataframe(
+        table,
+        use_container_width=True,
+        hide_index=True,
+        height=min(620, 42 + max(len(table),1)*35),
+        column_config={
+            'Orçamento':st.column_config.TextColumn('Orçamento',width='small'),
+            'Cliente':st.column_config.TextColumn('Cliente',width='medium'),
+            'Situação':st.column_config.TextColumn('Situação',width='medium'),
+            'Dias de prazo':st.column_config.NumberColumn('Dias de prazo',format='%d',width='small'),
+            'Metragem prevista (m²)':st.column_config.TextColumn('Metragem prevista (m²)',width='small'),
+            'Valor da venda':st.column_config.TextColumn('Valor da venda',width='small'),
+            'PDF':st.column_config.LinkColumn('PDF',display_text='Abrir',width='small'),
+        },
+    )
 
 
 elif nav=='Materiais e Estoque':
