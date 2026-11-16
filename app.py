@@ -127,7 +127,11 @@ def _autenticar_granart():
                 st.error("Usuário ou senha incorretos.")
     st.stop()
 
-_autenticar_granart()
+from granart_auth import piloto_ativo, exigir_acesso
+if piloto_ativo():
+    exigir_acesso()
+else:
+    _autenticar_granart()
 
 MONTHS=['Jan','Fev','Mar','Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez']
 FULL=['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro']

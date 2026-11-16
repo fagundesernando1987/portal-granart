@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+:root{color-scheme:light}*{box-sizing:border-box}body{font:14px system-ui,Arial,sans-serif;color:#302e2d;background:#f0ede7;margin:0;padding:10px}input,button{width:100%;padding:10px;margin:5px 0;border-radius:7px;border:1px solid #bfb6a9;background:white;color:#302e2d;font:inherit}button{cursor:pointer;font-weight:600}button.primary{background:#3c352d;color:#fff}button:disabled{opacity:.55;cursor:wait}#status{font-size:12px;white-space:pre-wrap;overflow-wrap:anywhere;margin:8px 0}.hide{display:none}.small{font-size:12px}.key{border-top:1px solid #d2c7b6;padding:6px 0;overflow-wrap:anywhere}.key button{font-size:12px}h3{margin:5px 0 10px}label{font-size:12px}
+</style></head><body>
+<h3>Gran’Art · Acesso</h3>
+<div id="status" role="status">Preparando autenticação…</div>
+<div id="login" class="hide">
+<label for="email">E-mail do sócio</label><input id="email" type="email" autocomplete="username" placeholder="email@exemplo.com">
+<label for="password">Senha</label><input id="password" type="password" autocomplete="current-password" placeholder="Senha">
+<button id="passwordLogin" class="primary">Entrar com senha</button>
+<button id="passkeyLogin">Entrar com Face ID / biometria</button>
+</div>
+<div id="logged" class="hide">
+<div class="small" id="who"></div>
+<button id="register" class="primary">Cadastrar biometria neste aparelho</button>
+<button id="list">Ver dispositivos cadastrados</button>
+<div id="keys"></div>
+<button id="logout">Sair da conta</button>
+</div>
+<script type="module">
+// O componente e servido pela mesma origem do portal em uma rota de componentes.
+// O token nunca e colocado na URL. A autorizacao e revalidada no servidor Python.
+const $=id=>document.getElementById(id);
+let supabase=null, session=null, settings=null, busy=false;
+function streamlitValue(value){window.parent.postMessage({isStreamlitMessage:true,type:'streamlit:setComponentValue',value},'*')}
+function height(){window.parent.postMessage({isStreamlitMessage:true,type:'streamlit:setFrameHeight',height:Math.max(260,document.body.scrollHeight+18)},'*')}
+function show(message, bad=false){$('status').textContent=message;$('status').style.color=bad?'#a12222':'#514838';height()}
+function view(){ $('login').classList.toggle('hide',!!session);$('logged').classList.toggle('hide',!session);$('who').textContent=session?.user?.email||'';height() }
+function publish(){streamlitValue(session?.access_token?{access_token:session.access_token}:null);view()}
+async function perform(label, action){if(busy)return;busy=true;show(label);try{await action()}catch(e){show('Não foi possível concluir: '+(e?.message||String(e)),true)}finally{busy=false;height()}}
+async function keys(){const {data,error}=await supabase.auth.passkey.list();if(error)throw error;const list=Array.isArray(data)?data:(data?.passkeys||[]);$('keys').replaceChildren();if(!list.length){$('keys').textContent='Nenhum dispositivo cadastrado.';return}
+for(const k of list){const div=document.createElement('div');div.className='key';const name=document.createElement('div');name.textContent=k.friendly_name||k.friendlyName||'Dispositivo';div.append(name);const b=document.createElement('button');b.textContent='Excluir esta passkey (não encerra sessões abertas)';b.addEventListener('click',()=>perform('Revogando…',async()=>{if(!confirm('Revogar esta chave de acesso?'))return;const {error}=await supabase.auth.passkey.delete({passkeyId:k.id});if(error)throw error;await keys();show('Chave revogada. Sessões existentes podem exigir revogação separada.')}));div.append(b);$('keys').append(div)}height()}
+window.addEventListener('message',async event=>{if(event.source!==window.parent||event.data?.type!=='streamlit:render')return;
+if(supabase)return;settings=event.data.args||{};
+if(!settings.url||!settings.publishableKey){show('Configuração de autenticação ausente.',true);return}
+try{
+  // Versão mínima com suporte experimental a passkeys. Carregada somente no navegador.
+  const {createClient}=await import('https://esm.sh/@supabase/supabase-js@2.105.0?bundle');
+  supabase=createClient(settings.url,settings.publishableKey,{auth:{experimental:{passkey:true},persistSession:true,autoRefreshToken:true,detectSessionInUrl:false}});
+  const {data,error}=await supabase.auth.getSession();if(error)throw error;session=data.session;publish();show(session?'Acesso autenticado.':'Entre com senha ou biometria.');
+  supabase.auth.onAuthStateChange((_event,s)=>{const before=session?.access_token;session=s;if(before!==session?.access_token)publish();else view()});
+}catch(e){show('Falha ao carregar autenticação: '+(e?.message||String(e)),true)}
+});
+$('passwordLogin').addEventListener('click',()=>perform('Validando senha…',async()=>{const {error}=await supabase.auth.signInWithPassword({email:$('email').value.trim(),password:$('password').value});if(error)throw error;$('password').value='';show('Login realizado. Se a conta estiver autorizada, o BI será liberado.');}));
+$('passkeyLogin').addEventListener('click',()=>perform('Confirme a biometria no aparelho…',async()=>{const {error}=await supabase.auth.signInWithPasskey();if(error)throw error;show('Autenticação biométrica realizada.')}));
+$('register').addEventListener('click',()=>perform('Confirme o cadastro no aparelho…',async()=>{const {error}=await supabase.auth.registerPasskey();if(error)throw error;await keys();show('Biometria cadastrada.')}));
+$('list').addEventListener('click',()=>perform('Consultando dispositivos…',async()=>{await keys();show('Dispositivos cadastrados:')}));
+$('logout').addEventListener('click',()=>perform('Saindo…',async()=>{const {error}=await supabase.auth.signOut();if(error)throw error;session=null;publish();show('Sessão encerrada.')}));
+window.parent.postMessage({isStreamlitMessage:true,type:'streamlit:componentReady',apiVersion:1},'*');height();
+</script></body></html>
