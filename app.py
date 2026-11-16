@@ -127,7 +127,21 @@ def _autenticar_granart():
                 st.error("Usuário ou senha incorretos.")
     st.stop()
 
-_autenticar_granart()
+# Biometria opcional: o login original permanece independente do modulo experimental.
+# Quando habilitada, qualquer erro bloqueia acesso ao BI (fail-closed).
+try:
+    _biometria_ativa = st.secrets.get("auth_passkeys", {}).get("enabled", False) is True
+except Exception:
+    _biometria_ativa = False
+if _biometria_ativa:
+    try:
+        from granart_auth import exigir_acesso
+        exigir_acesso()
+    except Exception as _auth_erro:
+        st.error("Autenticação biométrica indisponível. Nenhum dado foi carregado. Desative auth_passkeys.enabled nos Secrets para usar o login anterior.")
+        st.stop()
+else:
+    _autenticar_granart()
 
 MONTHS=['Jan','Fev','Mar','Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez']
 FULL=['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro']

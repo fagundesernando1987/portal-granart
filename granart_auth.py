@@ -4,11 +4,16 @@ import urllib.request
 import urllib.error
 import json
 import streamlit as st
-import streamlit.components.v1 as components
+import importlib
 
-_COMPONENT = components.declare_component(
-    'granart_passkeys', path=str(Path(__file__).resolve().parent / 'components' / 'granart_auth' / 'frontend')
-)
+def _componente():
+    # Importacao adiada: se o piloto estiver desligado, nao inicializa o componente.
+    frontend = Path(__file__).resolve().parent / 'components' / 'granart_auth' / 'frontend'
+    if not (frontend / 'index.html').is_file():
+        st.error('Arquivos da autenticacao incompletos: falta components/granart_auth/frontend/index.html')
+        st.stop()
+    v1 = importlib.import_module('streamlit.components.v1')
+    return v1.declare_component('granart_passkeys', path=str(frontend))
 
 
 def _cfg():
@@ -53,7 +58,7 @@ def exigir_acesso():
         st.stop()
     st.sidebar.caption('ACESSO SEGURO · HOMOLOGAÇÃO')
     # Token recebido de um componente de navegador; somente o Supabase valida a identidade.
-    resultado = _COMPONENT(url=url, publishableKey=pub, key='granart_passkeys_component', default=None)
+    resultado = _componente()(url=url, publishableKey=pub, key='granart_passkeys_component', default=None)
     token = resultado.get('access_token') if isinstance(resultado, dict) else None
     usuario = _validar_token(url, pub, token)
     if usuario is None:
