@@ -9,7 +9,7 @@ from html import escape as html_escape
 from xml.sax.saxutils import escape as xml_escape
 
 ROOT=Path(__file__).resolve().parent
-st.set_page_config(page_title='Gran’Art | Portal Executivo',page_icon='🏛️',layout='wide',initial_sidebar_state='collapsed')
+st.set_page_config(page_title='Gran’Art | Portal Executivo',page_icon=str(Path(__file__).resolve().parent/'granart_icon.png'),layout='wide',initial_sidebar_state='collapsed')
 st.markdown('''<style>
 .stApp{background:#f8f7f4;color:#302e2d}[data-testid="stSidebar"]{background:#f0ede7;border-right:1px solid #e2ddd3}
 .block-container{padding-top:1.1rem;max-width:1650px}h1,h2,h3{color:#302e2d;letter-spacing:-.02em}
@@ -44,6 +44,36 @@ background-color:#fff!important;color:#302e2d!important;-webkit-text-fill-color:
 /* Cabeçalhos das tabelas nativas: mesma paleta Gran’Art, maior contraste */
 [data-testid="stDataFrame"] [role="columnheader"]{background:#eee9e0!important;color:#37332e!important;font-weight:650!important;border-bottom:2px solid #aa987a!important}
 [data-testid="stDataFrame"]{border:1px solid #e0dbd2;border-radius:9px;overflow:hidden}
+
+/* Gran'Art mobile: contraste uniforme, inclusive portais de seleção */
+[data-testid="stHeader"]{background:#f8f7f4!important;color:#302e2d!important}
+[data-testid="stHeader"] button,[data-testid="stSidebarCollapsedControl"] button,
+[data-testid="stSidebarCollapseButton"] button,[data-testid="stSidebarNav"] button{
+ background:#eee9e0!important;color:#302e2d!important;border:1px solid #c9c0b2!important;border-radius:8px!important}
+[data-testid="stHeader"] svg,[data-testid="stSidebarCollapsedControl"] svg,
+[data-testid="stSidebarCollapseButton"] svg{fill:none!important;stroke:#302e2d!important;color:#302e2d!important;opacity:1!important}
+[data-baseweb="select"],[data-baseweb="select"]>div,[data-baseweb="select"] input,
+[data-baseweb="select"] [role="combobox"], [data-testid="stSelectbox"]>div>div{
+ background-color:#fff!important;color:#302e2d!important;-webkit-text-fill-color:#302e2d!important;color-scheme:light!important}
+[data-baseweb="select"] svg{color:#302e2d!important;fill:#302e2d!important}
+[data-baseweb="popover"],[data-baseweb="popover"]>div,[data-baseweb="menu"],
+[data-baseweb="menu"] ul,[role="listbox"], [role="option"],
+[data-baseweb="popover"] li,[data-baseweb="popover"] span{
+ background-color:#fff!important;color:#302e2d!important;-webkit-text-fill-color:#302e2d!important;color-scheme:light!important}
+[role="option"][aria-selected="true"],[role="option"]:hover,
+[data-baseweb="menu"] li:hover{background:#eee9e0!important;color:#302e2d!important}
+[data-testid="stSegmentedControl"] button,[data-testid="stSegmentedControl"] button p{
+ color:#302e2d!important;background-color:#fff!important}
+[data-testid="stSegmentedControl"] button[aria-checked="true"],
+[data-testid="stSegmentedControl"] button[aria-pressed="true"]{background:#e6dccb!important}
+[data-testid="stDataFrame"]{color-scheme:light!important}
+[data-testid="stDataFrame"] canvas{color-scheme:light!important}
+[data-testid="stExpander"]{background:#fff!important;color:#302e2d!important;border-radius:9px}
+@media(max-width:767px){
+ [data-testid="stHeader"]{min-height:3rem!important}
+ [data-testid="stSidebarCollapsedControl"]{z-index:999!important}
+ [data-testid="stSidebarCollapsedControl"] button{min-width:42px!important;min-height:42px!important}
+}
 </style>''',unsafe_allow_html=True)
 
 import hashlib as _hashlib
@@ -238,7 +268,7 @@ def chart(fig):
 
 with st.sidebar:
     st.image(str(ROOT/'logo_granart.png'),width='stretch')
-    st.caption('PORTAL EXECUTIVO · V3.6.8')
+    st.caption('PORTAL EXECUTIVO · V3.6.9')
     if '_pending_nav' in st.session_state:st.session_state['nav']=st.session_state.pop('_pending_nav')
     nav=st.radio('Menu',['Visão Geral','DRE — Resultados','Financeiro','Comercial','Romaneios','Produção','Materiais e Estoque','Margem e Planejamento'],label_visibility='collapsed',key='nav')
     st.divider()
