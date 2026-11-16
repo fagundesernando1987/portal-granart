@@ -11,34 +11,33 @@ from xml.sax.saxutils import escape as xml_escape
 ROOT=Path(__file__).resolve().parent
 st.set_page_config(page_title='Gran’Art | Portal Executivo',page_icon=str(Path(__file__).resolve().parent/'granart_icon.png'),layout='wide',initial_sidebar_state='collapsed')
 
-# Ícone de Tela de Início no Safari/iOS e manifesto para outros celulares.
-# Não altera a autenticação nem a lógica do BI.
-try:
-    st.html("""
-    <script>
-    (function () {
-      try {
-        const doc = window.parent.document;
-        const head = doc.head;
-        const items = [
-          ['apple-touch-icon', '/app/static/granart-180.png?v=20261116'],
-          ['manifest', '/app/static/manifest.webmanifest?v=20261116']
-        ];
-        for (const [rel, href] of items) {
-          let el = head.querySelector('link[rel="' + rel + '"]');
-          if (!el) { el = doc.createElement('link'); el.rel = rel; head.appendChild(el); }
-          el.href = href;
-        }
-        let meta = head.querySelector('meta[name="apple-mobile-web-app-title"]');
-        if (!meta) { meta = doc.createElement('meta'); meta.name = 'apple-mobile-web-app-title'; head.appendChild(meta); }
-        meta.content = 'Gran’Art';
-      } catch (e) { console.warn('GranArt: ícone mobile não configurado', e); }
-    })();
-    </script>
-    """, unsafe_allow_javascript=True)
-except (AttributeError, TypeError):
-    # Se a versão do Streamlit não oferecer JS em st.html, o BI continua funcional.
-    pass
+# Metadados do atalho no Safari/iOS (sem alterar login ou BI).
+# st.html executa no documento do Streamlit, não em iframe de componente.
+st.html("""<script>
+(() => {
+  const doc = document;
+  const head = doc.head;
+  const base = '/app/static/';
+  function link(rel, href, sizes) {
+    let node = head.querySelector('link[rel="' + rel + '"]');
+    if (!node) { node = doc.createElement('link'); node.rel = rel; head.appendChild(node); }
+    node.setAttribute('href', href);
+    if (sizes) node.setAttribute('sizes', sizes);
+  }
+  function meta(name, value) {
+    let node = head.querySelector('meta[name="' + name + '"]');
+    if (!node) { node = doc.createElement('meta'); node.name = name; head.appendChild(node); }
+    node.content = value;
+  }
+  link('apple-touch-icon', base + 'granart-180.png?v=20261116b', '180x180');
+  link('apple-touch-icon-precomposed', base + 'granart-180.png?v=20261116b', '180x180');
+  link('manifest', base + 'manifest.webmanifest?v=20261116b');
+  meta('apple-mobile-web-app-title', 'Gran’Art');
+  meta('application-name', 'Gran’Art');
+  meta('apple-mobile-web-app-capable', 'yes');
+  doc.title = 'Gran’Art | Portal Executivo';
+})();
+</script>""", unsafe_allow_javascript=True)
 
 st.markdown('''<style>
 .stApp{background:#f8f7f4;color:#302e2d}[data-testid="stSidebar"]{background:#f0ede7;border-right:1px solid #e2ddd3}
