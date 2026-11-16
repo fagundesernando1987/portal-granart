@@ -961,7 +961,7 @@ elif nav=='Produção':
     </style><div class="ga-pedidos-scroll"><table class="ga-pedidos"><thead><tr>
     <th>Orçamento</th><th>Cliente</th><th>Situação</th><th>Dias de prazo</th>
     <th>Metragem prevista (m²)</th><th>Valor da venda</th><th>PDF</th>
-    </tr></thead><tbody>'''+''.join(linhas)+'''</tbody></table></div>''',unsafe_allow_html=True)
+    </tr></thead><tbody>'''+''.join(linhas)+'''</tbody></table></div>'''.replace('\n',''),unsafe_allow_html=True)
 
 
 elif nav=='Materiais e Estoque':
