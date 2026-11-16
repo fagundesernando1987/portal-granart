@@ -10,6 +10,36 @@ from xml.sax.saxutils import escape as xml_escape
 
 ROOT=Path(__file__).resolve().parent
 st.set_page_config(page_title='Gran’Art | Portal Executivo',page_icon=str(Path(__file__).resolve().parent/'granart_icon.png'),layout='wide',initial_sidebar_state='collapsed')
+
+# Ícone de Tela de Início no Safari/iOS e manifesto para outros celulares.
+# Não altera a autenticação nem a lógica do BI.
+try:
+    st.html("""
+    <script>
+    (function () {
+      try {
+        const doc = window.parent.document;
+        const head = doc.head;
+        const items = [
+          ['apple-touch-icon', '/app/static/granart-180.png?v=20261116'],
+          ['manifest', '/app/static/manifest.webmanifest?v=20261116']
+        ];
+        for (const [rel, href] of items) {
+          let el = head.querySelector('link[rel="' + rel + '"]');
+          if (!el) { el = doc.createElement('link'); el.rel = rel; head.appendChild(el); }
+          el.href = href;
+        }
+        let meta = head.querySelector('meta[name="apple-mobile-web-app-title"]');
+        if (!meta) { meta = doc.createElement('meta'); meta.name = 'apple-mobile-web-app-title'; head.appendChild(meta); }
+        meta.content = 'Gran’Art';
+      } catch (e) { console.warn('GranArt: ícone mobile não configurado', e); }
+    })();
+    </script>
+    """, unsafe_allow_javascript=True)
+except (AttributeError, TypeError):
+    # Se a versão do Streamlit não oferecer JS em st.html, o BI continua funcional.
+    pass
+
 st.markdown('''<style>
 .stApp{background:#f8f7f4;color:#302e2d}[data-testid="stSidebar"]{background:#f0ede7;border-right:1px solid #e2ddd3}
 .block-container{padding-top:1.1rem;max-width:1650px}h1,h2,h3{color:#302e2d;letter-spacing:-.02em}
