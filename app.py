@@ -635,8 +635,11 @@ elif nav=='Margem e Planejamento':
     peso_aberto=float(annual.loc[aberto,'peso_igual'].sum())
     if n_open and total_necessario is not None and peso_aberto>0:
         annual.loc[aberto,'meta_recalculada']=max(0,total_necessario)*annual.loc[aberto,'peso_igual']/peso_aberto
-    # Tendência independente da meta recalculada: mantém a projeção original para meses abertos.
-    future=[calculo(float(row.meta_mensal),*original_rates,*original_costs) for row in annual.itertuples()]
+    # Tendência dinâmica: desempenho efetivo de receita nos meses fechados ajusta
+    # a projeção dos meses abertos, sem modificar a meta original/congelada.
+    fator_tendencia=(bruto_acumulado/float(annual.loc[fechado,'meta_mensal'].sum())) if fechado.any() and float(annual.loc[fechado,'meta_mensal'].sum())>0 else 1.0
+    future=[calculo(float(row.meta_mensal)*(fator_tendencia if bool(aberto.iloc[idx]) else 1.0),*original_rates,*original_costs) for idx,row in enumerate(annual.itertuples())]
+    annual['receita_tendencia']=annual['realizado'].where(fechado, annual['meta_mensal']*fator_tendencia)
     annual['lucro_meta']=[v['lucro_liquido'] for v in prev]
     annual['lucro_tendencia']=annual['lucro_realizado'].where(fechado,pd.Series([v['lucro_liquido'] for v in future],index=annual.index))
     # Parcial do mês atual: somente DRE_Mensal, não a previsão gerencial.
@@ -683,6 +686,7 @@ elif nav=='Margem e Planejamento':
     if year==2026:st.caption('Plano original de 2026 reconstruído retrospectivamente com dados de 2025.')
     if total_necessario is None:st.error('Meta Recalculada inviável: CPV igual ou superior à Receita Líquida.')
     elif total_necessario<0 and n_open:st.info('O lucro acumulado já permite atingir a meta sem Receita Bruta adicional, consideradas as despesas futuras.')
+    st.caption(f'Tendência: realizado dos meses fechados ÷ meta desses mesmos meses = {pct(fator_tendencia*100)}. A receita dos meses abertos segue a meta original de cada mês multiplicada por esse fator. CPV, Simples e RT acompanham a receita líquida projetada; despesas fixas seguem o plano mensal. Meta recalculada é outro indicador: faturamento necessário para atingir a meta de lucro anual.')
     st.subheader('Acompanhamento mensal')
     annual['exibido']=annual.realizado.where(fechado,annual.parcial)
     table=pd.DataFrame({
@@ -691,6 +695,7 @@ elif nav=='Margem e Planejamento':
         'Receita Bruta Realizada':annual.exibido,
         '% Receita Meta':annual.pct_meta,
         'Receita Bruta Meta Recalculada':annual.meta_recalculada,
+        'Receita Bruta Tendência':annual['receita_tendencia'].where(aberto),
         'Lucro Líquido Meta':annual.lucro_meta,
         'Lucro Líquido Realizado':annual.lucro_realizado,
         '% Lucro Líquido Meta':annual.lucro_realizado.div(annual.lucro_meta.where(annual.lucro_meta.ne(0))).mul(100),
@@ -705,6 +710,7 @@ elif nav=='Margem e Planejamento':
         'Receita Bruta Realizada':total_exibido,
         '% Receita Meta':100*total_exibido/gross_target if gross_target else float('nan'),
         'Receita Bruta Meta Recalculada':float(annual.meta_recalculada.sum(skipna=True)) if n_open else float('nan'),
+        'Receita Bruta Tendência':float(annual.loc[aberto,'receita_tendencia'].sum()) if n_open else float('nan'),
         'Lucro Líquido Meta':float(annual.lucro_meta.sum()),
         'Lucro Líquido Realizado':lucro_acumulado,
         '% Lucro Líquido Meta':100*lucro_acumulado/goal if goal else float('nan'),
@@ -712,7 +718,7 @@ elif nav=='Margem e Planejamento':
         'Diferença de Lucro':lucro_acumulado-goal,
     }
     table=pd.concat([table,pd.DataFrame([row])],ignore_index=True)
-    for k in ['Receita Bruta Meta','Receita Bruta Realizada','Receita Bruta Meta Recalculada','Lucro Líquido Meta','Lucro Líquido Realizado','Diferença de Lucro']:
+    for k in ['Receita Bruta Meta','Receita Bruta Realizada','Receita Bruta Meta Recalculada','Receita Bruta Tendência','Lucro Líquido Meta','Lucro Líquido Realizado','Diferença de Lucro']:
         table[k]=table[k].map(lambda v:money(v) if pd.notna(v) else '—')
     for k in ['% Receita Meta','% Lucro Líquido Meta']:
         table[k]=table[k].map(lambda v:pct(v) if pd.notna(v) else '—')
@@ -724,6 +730,7 @@ elif nav=='Margem e Planejamento':
         'Receita Bruta Realizada':'Receita Bruta<br>Realizada',
         '% Receita Meta':'% Receita<br>Meta',
         'Receita Bruta Meta Recalculada':'Receita Bruta<br>Meta Recalculada',
+        'Receita Bruta Tendência':'Receita Bruta<br>Tendência',
         'Lucro Líquido Meta':'Lucro Líquido<br>Meta',
         'Lucro Líquido Realizado':'Lucro Líquido<br>Realizado',
         '% Lucro Líquido Meta':'% Lucro<br>Meta',
@@ -759,17 +766,27 @@ elif nav=='Margem e Planejamento':
     fig=go.Figure()
     fig.add_scatter(x=annual.mes.dt.strftime('%m/%Y'),y=annual.meta_mensal,mode='lines+markers',name='Meta original',line=dict(color='#ad946a'))
     fig.add_scatter(x=annual.mes.dt.strftime('%m/%Y'),y=annual.realizado,mode='lines+markers',name='Realizado fechado',line=dict(color='#305d6b'))
+    fig.add_scatter(x=annual.mes.dt.strftime('%m/%Y'),y=annual['receita_tendencia'],mode='lines+markers',name='Tendência por atingimento',line=dict(color='#8664a4',dash='dot'))
     fig.add_scatter(x=annual.mes.dt.strftime('%m/%Y'),y=annual.meta_recalculada,mode='lines+markers',name='Meta Recalculada',line=dict(color='#42776c',dash='dash'))
     chart(fig)
     st.subheader(f'DRE anual — {year}')
     dre_keys=[('Receita Bruta','receita_bruta'),('(-) Simples Nacional','simples'),('(-) Reserva técnica','reserva_tecnica'),('Receita Líquida','receita_liquida'),('(-) CPV de materiais','cpv'),('Margem de contribuição','lucro_bruto'),('(-) Despesas operacionais','despesas'),('(-) Salários e encargos','salarios_encargos'),('(-) Pró-labore','pro_labore'),('(-) Depreciação','depreciacao'),('Resultado financeiro','resultado_financeiro'),('Baixa de clientes','baixa_clientes'),('Lucro líquido','lucro_liquido')]
     periodo_realizado=(f'jan–{MONTHS[int(fechados.mes.dt.month.max())-1].lower()}/{year}' if len(fechados) else f'sem fechamento/{year}')
     dre_rows=[]
+    net_original=sum(v['receita_liquida'] for v in prev)
+    net_actual=float(val(fechados,'receita_liquida').sum())
+    net_trend=net_actual+sum(future[i]['receita_liquida'] for i in range(12) if bool(aberto.iloc[i]))
+    def percentual_sobre_liquida(valor, receita_liquida):
+        return pct(100*valor/receita_liquida) if abs(receita_liquida)>0.000001 else '—'
     for name,k in dre_keys:
         original=sum(v[k] for v in prev)
         actual=float(val(fechados,k).sum())
         trend=actual+sum(future[i][k] for i in range(12) if bool(aberto.iloc[i]))
-        dre_rows.append({'Conta':name,f'Planejado {year}':money(original),f'Realizado {periodo_realizado}':money(actual),f'Tendência {year}':money(trend)})
+        dre_rows.append({'Conta':name,
+            f'Planejado {year}':money(original), '% RL planejado':percentual_sobre_liquida(original,net_original),
+            f'Realizado {periodo_realizado}':money(actual), '% RL realizado':percentual_sobre_liquida(actual,net_actual),
+            f'Tendência {year}':money(trend), '% RL tendência':percentual_sobre_liquida(trend,net_trend)})
+    st.caption('Percentuais de cada conta ÷ Receita Líquida da respectiva coluna. O realizado considera somente meses fechados; a tendência combina realizado fechado e meses restantes projetados. Valores negativos de custos/despesas são preservados.')
     st.dataframe(pd.DataFrame(dre_rows),hide_index=True,width='stretch',height=490)
     st.subheader('Próximos 12 meses')
     available=plan[plan.mes.notna()].sort_values('mes').copy()
@@ -1027,14 +1044,15 @@ elif nav=='Materiais e Estoque':
     st.title('Materiais e Estoque')
     stock=sheet('BI_Estoque_Materiais');a,b=st.columns(2)
     with a:
-        scenarios=stock.cenario.dropna().astype(str).unique().tolist();scenario=st.selectbox('Estágio',['Todos os pedidos','Aguardando liberação','Aguardando medição','Aguardando produção'],index=0)
+        scenarios=stock.cenario.dropna().astype(str).unique().tolist();scenario=st.selectbox('Estágio',['Todos os pedidos','Aguardando liberação','Aguardando medição','Aguardando produção','Instalação concluída'],index=0)
     with b:q=st.text_input('Buscar material',placeholder='Ex.: Granito Preto São Gabriel')
     material_filter=q.strip()
     st.subheader('Consulta de pedidos e materiais')
     items=sheet('BI_Detalhe_Materiais').copy()
     # Corte concluído é filtro de exclusão. Somente pedidos vendidos presentes na carteira produtiva.
     items=items[~items.status_corte.fillna('').astype(str).str.strip().str.casefold().isin(['concluído','concluido'])]
-    items=items[~items.status_pedido.fillna('').astype(str).str.casefold().str.contains('instalação concluída|instalacao concluida',regex=True)]
+    # Não excluir pedidos instalados quando o corte ainda estiver pendente.
+    # O filtro acima, de corte concluído, é o critério de exclusão.
     if scenario!='Todos os pedidos':items=items[items.status_pedido.astype(str).str.strip()==scenario]
     if material_filter:items=items[items.material.fillna('').astype(str).str.contains(re.escape(material_filter),case=False,na=False)]
     query=st.text_input('Buscar orçamento ou cliente',key='material_order_query')
@@ -1044,11 +1062,27 @@ elif nav=='Materiais e Estoque':
     for k in ['m2_previsto','m2_realizado','m2_pendente']:items[k]=val(items,k).map(lambda z:num(z,1))
     show(items,['orcamento','cliente','material','status_pedido','m2_previsto','m2_realizado','m2_pendente'],{'orcamento':'Orçamento','cliente':'Cliente','material':'Material','status_pedido':'Situação do pedido','m2_previsto':'Previsto (m²)','m2_realizado':'Realizado (m²)','m2_pendente':'Pendente (m²)'},height=440)
     st.subheader('Planejamento de compras')
-    f=stock[stock.cenario==scenario].copy()
-    f=f[pd.to_numeric(f['demanda_pendente_m2'],errors='coerce').fillna(0)>0]
-    f=f[f.material.fillna('').astype(str).str.strip().str.casefold().isin(materiais_pedidos)]
-    if material_filter:f=f[f.material.astype(str).str.contains(re.escape(material_filter),case=False,na=False)]
-    cards([('Demanda pendente',num(val(f,'demanda_pendente_m2').sum(),1)+' m²'),('Necessidade de compra',num(val(f,'necessidade_teorica_m2').sum(),1)+' m²')])
+    # Fonte única da demanda: a mesma consulta detalhada, inclusive pedidos instalados
+    # cujo corte não foi concluído. Evita divergência com BI_Estoque_Materiais.
+    detalhe=items.copy()
+    detalhe['material_chave']=detalhe['material'].fillna('').astype(str).str.strip().str.casefold()
+    detalhe['pendente_num']=pd.to_numeric(detalhe['m2_pendente'].astype(str).str.replace('.','',regex=False).str.replace(',','.',regex=False),errors='coerce').fillna(0)
+    demanda=detalhe.groupby('material_chave',as_index=False)['pendente_num'].sum()
+    # Estoque físico: usar cenário geral como fonte de saldo, sem duplicar cenários.
+    estoque_base=stock[stock.cenario.astype(str).str.strip().eq('Todos os pedidos')].copy()
+    if estoque_base.empty:estoque_base=stock.copy().drop_duplicates(subset=['material'])
+    estoque_base['material_chave']=estoque_base.material.fillna('').astype(str).str.strip().str.casefold()
+    estoque_base=estoque_base.drop_duplicates(subset=['material_chave'])
+    f=demanda.merge(estoque_base[['material_chave','material','estoque_material_m2']],on='material_chave',how='left')
+    nomes=detalhe.drop_duplicates('material_chave').set_index('material_chave')['material']
+    f['material']=f['material'].fillna(f['material_chave'].map(nomes))
+    f['demanda_pendente_m2']=f['pendente_num'].clip(lower=0)
+    f['estoque_material_m2']=pd.to_numeric(f['estoque_material_m2'],errors='coerce')
+    f['saldo_material_m2']=f['estoque_material_m2']-f['demanda_pendente_m2']
+    f['necessidade_teorica_m2']=(f['demanda_pendente_m2']-f['estoque_material_m2']).clip(lower=0)
+    f=f[f['demanda_pendente_m2']>0].copy()
+    cards([('Demanda pendente',num(f['demanda_pendente_m2'].sum(),1)+' m²'),('Necessidade de compra',num(f['necessidade_teorica_m2'].sum(),1)+' m²')])
     if f.empty:st.info('Não há demanda pendente de materiais para os filtros selecionados.')
-    for k in ['demanda_pendente_m2','estoque_material_m2','necessidade_teorica_m2','saldo_material_m2']:f[k]=val(f,k).map(lambda z:num(z,1))
+    if f['estoque_material_m2'].isna().any():st.warning('Alguns materiais não possuem saldo de estoque informado; a necessidade de compra desses materiais ainda não pode ser calculada.')
+    for k in ['demanda_pendente_m2','estoque_material_m2','necessidade_teorica_m2','saldo_material_m2']:f[k]=f[k].map(lambda z:num(z,1) if pd.notna(z) else 'Sem saldo')
     show(f,['material','demanda_pendente_m2','estoque_material_m2','necessidade_teorica_m2','saldo_material_m2'],{'material':'Material','demanda_pendente_m2':'Demanda pendente (m²)','estoque_material_m2':'Estoque de material (m²)','necessidade_teorica_m2':'Necessidade de compra (m²)','saldo_material_m2':'Saldo de material (m²)'},height=470)
